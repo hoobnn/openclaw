@@ -4,7 +4,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { CommandLane } from "../process/lanes.js";
 
 const sessionStoreMocks = vi.hoisted(() => ({
-  updateSessionStoreEntry: vi.fn(async (params: { update: (entry: unknown) => unknown }) => {
+  patchSessionEntry: vi.fn(async (params: { update: (entry: unknown) => unknown }) => {
     await params.update({ sessionId: "session-1" });
   }),
 }));
@@ -20,7 +20,7 @@ vi.mock("../process/command-queue.js", () => commandQueueMocks);
 vi.mock("./command/session.js", () => ({
   resolveStoredSessionKeyForSessionId: () => ({
     sessionKey: "session-key",
-    storePath: "/tmp/openclaw-session-suspension-test/sessions.json",
+    agentId: "main",
   }),
 }));
 
@@ -44,7 +44,7 @@ describe("session suspension", () => {
     cancelLaneAutoResume(CommandLane.Cron);
     cancelLaneAutoResume(CommandLane.CronNested);
     vi.useRealTimers();
-    sessionStoreMocks.updateSessionStoreEntry.mockClear();
+    sessionStoreMocks.patchSessionEntry.mockClear();
     commandQueueMocks.setCommandLaneConcurrency.mockClear();
   });
 

@@ -1,5 +1,4 @@
 import path from "node:path";
-import type { ImageContent } from "@earendil-works/pi-ai";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { assertNoWindowsNetworkPath, safeFileURLToPath } from "../../../infra/local-file-access.js";
 import { resolveMediaReferenceLocalPath } from "../../../media/media-reference.js";
@@ -8,6 +7,7 @@ import { loadWebMedia } from "../../../media/web-media.js";
 import { normalizeLowercaseStringOrEmpty } from "../../../shared/string-coerce.js";
 import { resolveUserPath } from "../../../utils.js";
 import type { ImageSanitizationLimits } from "../../image-sanitization.js";
+import type { ImageContent } from "../../pi-ai-contract.js";
 import {
   createSandboxBridgeReadFile,
   resolveSandboxedBridgeMediaPath,

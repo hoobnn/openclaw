@@ -2,11 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearRestartSentinel, writeRestartSentinel } from "../infra/restart-sentinel.js";
 import type {
   PluginHookGatewayContext,
   PluginHookGatewayStartEvent,
 } from "../plugins/hook-types.js";
-import type { PluginServicesHandle } from "../plugins/services.js";
+import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { withEnvAsync } from "../test-utils/env.js";
 
 const hoisted = vi.hoisted(() => {
@@ -46,6 +47,9 @@ const hoisted = vi.hoisted(() => {
     allowed: true,
     inCatalog: true,
   }));
+  const resolveEmbeddedAgentRuntime = vi.fn(() => "pi");
+  const ensureOpenClawModelCatalog = vi.fn(async () => undefined);
+  const ensureOpenClawModelsJson = ensureOpenClawModelCatalog;
   const clearCurrentProviderAuthState = vi.fn();
   const warmCurrentProviderAuthState = vi.fn(async (_cfg?: unknown, _options?: unknown) => {});
   const setAuthProfileFailureHook = vi.fn();
@@ -78,6 +82,9 @@ const hoisted = vi.hoisted(() => {
     resolveHooksGmailModel,
     loadModelCatalog,
     getModelRefStatus,
+    resolveEmbeddedAgentRuntime,
+    ensureOpenClawModelCatalog,
+    ensureOpenClawModelsJson,
     clearCurrentProviderAuthState,
     warmCurrentProviderAuthState,
     setAuthProfileFailureHook,
@@ -85,14 +92,6 @@ const hoisted = vi.hoisted(() => {
     createTranscriptsAutoStartService,
   };
 });
-
-vi.mock("../agents/session-dirs.js", () => ({
-  resolveAgentSessionDirs: vi.fn(async () => []),
-}));
-
-vi.mock("../agents/session-write-lock.js", () => ({
-  cleanStaleLockFiles: vi.fn(async () => {}),
-}));
 
 vi.mock("../agents/subagent-registry.js", () => ({
   scheduleSubagentOrphanRecovery: hoisted.scheduleSubagentOrphanRecovery,
@@ -171,6 +170,14 @@ vi.mock("../agents/model-selection.js", () => ({
   resolveHooksGmailModel: hoisted.resolveHooksGmailModel,
 }));
 
+vi.mock("../agents/pi-embedded-runner/runtime.js", () => ({
+  resolveEmbeddedAgentRuntime: hoisted.resolveEmbeddedAgentRuntime,
+}));
+
+vi.mock("../agents/models-config.js", () => ({
+  ensureOpenClawModelCatalog: hoisted.ensureOpenClawModelCatalog,
+}));
+
 vi.mock("../agents/model-provider-auth.js", () => ({
   clearCurrentProviderAuthState: hoisted.clearCurrentProviderAuthState,
   warmCurrentProviderAuthState: hoisted.warmCurrentProviderAuthState,
@@ -194,7 +201,7 @@ vi.mock("./server-tailscale.js", () => ({
   startGatewayTailscaleExposure: hoisted.startGatewayTailscaleExposure,
 }));
 
-const { startGatewayPostAttachRuntime, startGatewaySidecars, testing } =
+const { startGatewayPostAttachRuntime, startGatewaySidecars, __testing } =
   await import("./server-startup-post-attach.js");
 const { STARTUP_UNAVAILABLE_GATEWAY_METHODS } = await import("./methods/core-descriptors.js");
 
@@ -250,9 +257,10 @@ function firstGatewayStartCall(
 }
 
 describe("startGatewayPostAttachRuntime", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.stubEnv("OPENCLAW_SKIP_CHANNELS", "0");
     vi.stubEnv("OPENCLAW_SKIP_PROVIDERS", "0");
+    await clearRestartSentinel();
     hoisted.startPluginServices.mockClear();
     hoisted.startGmailWatcherWithLogs.mockClear();
     hoisted.loadInternalHooks.mockClear();
@@ -268,6 +276,7 @@ describe("startGatewayPostAttachRuntime", () => {
     hoisted.scheduleSubagentOrphanRecovery.mockClear();
     hoisted.shouldWakeFromRestartSentinel.mockReturnValue(false);
     hoisted.scheduleRestartSentinelWake.mockClear();
+    hoisted.refreshLatestUpdateRestartSentinel.mockClear();
     hoisted.getAcpRuntimeBackend.mockReset();
     hoisted.getAcpRuntimeBackend.mockReturnValue(null);
     hoisted.reconcilePendingSessionIdentities.mockClear();
@@ -284,6 +293,10 @@ describe("startGatewayPostAttachRuntime", () => {
       allowed: true,
       inCatalog: true,
     });
+    hoisted.resolveEmbeddedAgentRuntime.mockReset();
+    hoisted.resolveEmbeddedAgentRuntime.mockReturnValue("pi");
+    hoisted.ensureOpenClawModelCatalog.mockReset();
+    hoisted.ensureOpenClawModelCatalog.mockResolvedValue(undefined);
     hoisted.clearCurrentProviderAuthState.mockClear();
     hoisted.warmCurrentProviderAuthState.mockReset();
     hoisted.warmCurrentProviderAuthState.mockResolvedValue(undefined);
@@ -295,6 +308,7 @@ describe("startGatewayPostAttachRuntime", () => {
   });
 
   afterEach(() => {
+    closeOpenClawStateDatabaseForTest();
     vi.unstubAllEnvs();
   });
 
@@ -489,87 +503,33 @@ describe("startGatewayPostAttachRuntime", () => {
     });
   });
 
-  it("skips heavy restart sentinel refresh when no sentinel file exists", async () => {
+  it("skips heavy restart sentinel refresh when no sentinel state exists", async () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-no-sentinel-"));
     vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
 
-    const result = await testing.refreshLatestUpdateRestartSentinelIfPresent();
+    const result = await __testing.refreshLatestUpdateRestartSentinelIfPresent();
 
     expect(result).toBeNull();
     expect(hoisted.refreshLatestUpdateRestartSentinel).not.toHaveBeenCalled();
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
-  it("refreshes the restart sentinel when the sentinel file exists", async () => {
+  it("refreshes the restart sentinel when SQLite sentinel state exists", async () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sentinel-"));
-    fs.writeFileSync(path.join(stateDir, "restart-sentinel.json"), "{}\n");
     vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    await writeRestartSentinel({
+      kind: "update",
+      status: "ok",
+      ts: 1,
+    });
     const sentinel = { kind: "update", status: "ok", ts: 1 } as const;
     hoisted.refreshLatestUpdateRestartSentinel.mockResolvedValue(sentinel);
 
-    const result = await testing.refreshLatestUpdateRestartSentinelIfPresent();
+    const result = await __testing.refreshLatestUpdateRestartSentinelIfPresent();
 
     expect(result).toBe(sentinel);
     expect(hoisted.refreshLatestUpdateRestartSentinel).toHaveBeenCalledOnce();
     fs.rmSync(stateDir, { recursive: true, force: true });
-  });
-
-  it("expands tilde-based restart sentinel state paths", async () => {
-    const osHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-home-"));
-    try {
-      const openclawHome = path.join(osHome, "openclaw-home");
-      const stateDirFromHome = path.join(openclawHome, ".openclaw");
-      fs.mkdirSync(stateDirFromHome, { recursive: true });
-      fs.writeFileSync(path.join(stateDirFromHome, "restart-sentinel.json"), "{}\n");
-
-      expect(
-        await testing.hasRestartSentinelFileFast({
-          HOME: osHome,
-          OPENCLAW_HOME: "~/openclaw-home",
-        } as NodeJS.ProcessEnv),
-      ).toBe(true);
-
-      const backslashStateDir = path.resolve(`${osHome}\\openclaw-state`);
-      fs.mkdirSync(backslashStateDir, { recursive: true });
-      fs.writeFileSync(path.join(backslashStateDir, "restart-sentinel.json"), "{}\n");
-
-      expect(
-        await testing.hasRestartSentinelFileFast({
-          HOME: osHome,
-          OPENCLAW_STATE_DIR: "~\\openclaw-state",
-        } as NodeJS.ProcessEnv),
-      ).toBe(true);
-    } finally {
-      fs.rmSync(osHome, { recursive: true, force: true });
-    }
-  });
-
-  it("avoids sync filesystem probes while checking restart sentinel presence", async () => {
-    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-async-sentinel-"));
-    try {
-      fs.writeFileSync(path.join(stateDir, "restart-sentinel.json"), "{}\n");
-      const actualExistsSync = fs.existsSync;
-      const existsSync = vi.spyOn(fs, "existsSync").mockImplementation((candidate) => {
-        if (String(candidate).startsWith(stateDir)) {
-          throw new Error("sync restart sentinel probe");
-        }
-        return actualExistsSync(candidate);
-      });
-      try {
-        await expect(
-          testing.hasRestartSentinelFileFast({
-            OPENCLAW_STATE_DIR: stateDir,
-          } as NodeJS.ProcessEnv),
-        ).resolves.toBe(true);
-        expect(
-          existsSync.mock.calls.filter((call) => String(call[0]).startsWith(stateDir)),
-        ).toHaveLength(0);
-      } finally {
-        existsSync.mockRestore();
-      }
-    } finally {
-      fs.rmSync(stateDir, { recursive: true, force: true });
-    }
   });
 
   it("loads deferred startup plugins before channel sidecars", async () => {
@@ -702,10 +662,10 @@ describe("startGatewayPostAttachRuntime", () => {
 
     expect(hoisted.startGatewayMemoryBackend).not.toHaveBeenCalled();
     expect(
-      testing.resolveGatewayMemoryStartupPolicy({ memory: { backend: "qmd" } } as never),
+      __testing.resolveGatewayMemoryStartupPolicy({ memory: { backend: "qmd" } } as never),
     ).toEqual({ mode: "off" });
     expect(
-      testing.resolveGatewayMemoryStartupPolicy({
+      __testing.resolveGatewayMemoryStartupPolicy({
         memory: { backend: "qmd", qmd: { update: { startup: "immediate", onBoot: false } } },
       } as never),
     ).toEqual({ mode: "off" });
@@ -793,6 +753,35 @@ describe("startGatewayPostAttachRuntime", () => {
     resumeSidecars();
     await runtimePromise;
     expect(returned).toBe(true);
+  });
+
+  it("continues channel startup when primary model prewarm hangs", async () => {
+    vi.useFakeTimers();
+    const log = { warn: vi.fn() };
+    const prewarm = vi.fn(async () => {
+      await new Promise(() => undefined);
+    });
+
+    try {
+      const promise = __testing.prewarmConfiguredPrimaryModelWithTimeout(
+        {
+          cfg: {} as never,
+          log,
+          timeoutMs: 25,
+        },
+        prewarm as never,
+      );
+
+      await vi.advanceTimersByTimeAsync(25);
+      await promise;
+
+      expect(prewarm).toHaveBeenCalledTimes(1);
+      expect(log.warn).toHaveBeenCalledWith(
+        "startup model warmup timed out after 25ms; continuing without waiting",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("delays provider auth prewarm so post-ready gateway work can run first", async () => {
@@ -1027,7 +1016,34 @@ describe("startGatewayPostAttachRuntime", () => {
     }
   });
 
-  it("starts channels when channel startup is enabled", async () => {
+  it("prewarms the model catalog in the configured default agent dir", async () => {
+    const cfg = {
+      agents: {
+        defaults: { model: "openai/gpt-5.4" },
+        list: [{ id: "main" }, { id: "ops", default: true }],
+      },
+    } as never;
+    hoisted.resolveAgentModelPrimaryValue.mockReturnValue("openai/gpt-5.4");
+    hoisted.resolveDefaultAgentDir.mockReturnValue("/tmp/openclaw-state/agents/ops/agent");
+
+    await __testing.prewarmConfiguredPrimaryModel({
+      cfg,
+      workspaceDir: "/tmp/openclaw-workspace",
+      log: { warn: vi.fn() },
+    });
+
+    expect(hoisted.resolveDefaultAgentDir).toHaveBeenCalledWith(cfg);
+    expect(hoisted.ensureOpenClawModelCatalog).toHaveBeenCalledWith(
+      cfg,
+      "/tmp/openclaw-state/agents/ops/agent",
+      expect.objectContaining({
+        workspaceDir: "/tmp/openclaw-workspace",
+        providerDiscoveryProviderIds: ["openai"],
+      }),
+    );
+  });
+
+  it("starts channels without waiting for primary model prewarm completion", async () => {
     await withEnvAsync(
       {
         OPENCLAW_SKIP_CHANNELS: undefined,
@@ -1337,7 +1353,7 @@ describe("startGatewayPostAttachRuntime", () => {
   it("stops post-ready sidecars registered after close started", () => {
     const postReadySidecar = { stop: vi.fn() };
 
-    testing.stopPostReadySidecarsAfterCloseStarted({
+    __testing.stopPostReadySidecarsAfterCloseStarted({
       postReadySidecars: [postReadySidecar],
       closeStarted: true,
     });
@@ -1348,7 +1364,7 @@ describe("startGatewayPostAttachRuntime", () => {
   it("keeps post-ready sidecars running when close has not started", () => {
     const postReadySidecar = { stop: vi.fn() };
 
-    testing.stopPostReadySidecarsAfterCloseStarted({
+    __testing.stopPostReadySidecarsAfterCloseStarted({
       postReadySidecars: [postReadySidecar],
       closeStarted: false,
     });

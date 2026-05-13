@@ -1,5 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
-import { asFiniteNumber } from "../../shared/number-coercion.js";
+import type { Api, Model } from "../pi-ai-contract.js";
 
 type PiModelWithOptionalContextTokens = Model<Api> & {
   contextTokens?: number;

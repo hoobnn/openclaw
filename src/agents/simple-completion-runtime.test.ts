@@ -1,6 +1,5 @@
-import type { Model } from "@earendil-works/pi-ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Model } from "./pi-ai-contract.js";
 
 const hoisted = vi.hoisted(() => ({
   resolveModelMock: vi.fn(),
@@ -14,7 +13,7 @@ const hoisted = vi.hoisted(() => ({
   completeMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("./pi-ai-contract.js", () => ({
   completeSimple: hoisted.completeMock,
 }));
 
@@ -446,7 +445,7 @@ describe("prepareSimpleCompletionModel", () => {
     });
     hoisted.getApiKeyForModelMock.mockResolvedValueOnce({
       apiKey: "ollama-local",
-      source: "models.json (local marker)",
+      source: "stored model catalog (local marker)",
       mode: "api-key",
     });
 
@@ -582,7 +581,7 @@ describe("completeWithPreparedSimpleCompletionModel", () => {
       model,
       auth: {
         apiKey: "ollama-local",
-        source: "models.json (local marker)",
+        source: "stored model catalog (local marker)",
         mode: "api-key",
       },
       cfg,

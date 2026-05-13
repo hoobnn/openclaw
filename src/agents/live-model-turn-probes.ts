@@ -1,5 +1,4 @@
-import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
-import { normalizeStringEntries } from "../shared/string-normalization.js";
+import type { Api, AssistantMessage, Context, Model } from "./pi-ai-contract.js";
 
 export const LIVE_MODEL_FILE_PROBE_TOKEN = "opal";
 

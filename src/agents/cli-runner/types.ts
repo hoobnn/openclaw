@@ -1,4 +1,3 @@
-import type { ImageContent } from "@earendil-works/pi-ai";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
 import type { ReplyOperation } from "../../auto-reply/reply/reply-run-registry.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
@@ -16,8 +15,7 @@ import type {
 } from "../../sessions/user-turn-transcript.js";
 import type { BootstrapContextMode } from "../bootstrap-files.js";
 import type { ResolvedCliBackend } from "../cli-backends.js";
-import type { ContextWindowInfo } from "../context-window-guard.js";
-import type { EmbeddedAgentExecutionPhase } from "../pi-embedded-runner/execution-phase.js";
+import type { ImageContent } from "../pi-ai-contract.js";
 import type {
   CurrentInboundPromptContext,
   EmbeddedRunTrigger,
@@ -31,7 +29,6 @@ export type RunCliAgentParams = {
   sessionEntry?: SessionEntry;
   agentId?: string;
   trigger?: EmbeddedRunTrigger;
-  sessionFile: string;
   workspaceDir: string;
   config?: OpenClawConfig;
   prompt: string;
@@ -77,7 +74,7 @@ export type RunCliAgentParams = {
   abortSignal?: AbortSignal;
   onExecutionStarted?: () => void;
   onExecutionPhase?: (info: {
-    phase: EmbeddedAgentExecutionPhase;
+    phase: "process_spawned" | "model_call_started";
     provider?: string;
     model?: string;
     backend?: string;

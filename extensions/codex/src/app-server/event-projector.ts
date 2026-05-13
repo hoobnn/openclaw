@@ -1,4 +1,3 @@
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import {
   classifyAgentHarnessTerminalOutcome,
   embeddedAgentLog,
@@ -8,6 +7,7 @@ import {
   formatToolProgressOutput,
   inferToolMetaFromArgs,
   normalizeUsage,
+  resolveSessionAgentIds,
   runAgentHarnessAfterCompactionHook,
   runAgentHarnessAfterToolCallHook,
   runAgentHarnessBeforeCompactionHook,
@@ -21,12 +21,9 @@ import {
   type ToolProgressDetailMode,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
-import {
-  asBoolean,
-  asFiniteNumber,
-  normalizeStringEntries,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import type { AssistantMessage, Usage } from "openclaw/plugin-sdk/provider-ai";
 import { resolveCodexLocalRuntimeAttribution } from "./local-runtime-attribution.js";
+import { CodexNativeSubagentTaskMirror } from "./native-subagent-task-mirror.js";
 import {
   readCodexNotificationThreadId,
   readCodexNotificationTurnId,
@@ -496,7 +493,6 @@ export class CodexAppServerEventProjector {
     if (item?.type === "contextCompaction" && itemId) {
       this.activeCompactionItemIds.add(itemId);
       await runAgentHarnessBeforeCompactionHook({
-        sessionFile: this.params.sessionFile,
         messages: await this.readMirroredSessionMessages(),
         ctx: {
           runId: this.params.runId,
@@ -555,7 +551,6 @@ export class CodexAppServerEventProjector {
       this.activeCompactionItemIds.delete(itemId);
       this.completedCompactionCount += 1;
       await runAgentHarnessAfterCompactionHook({
-        sessionFile: this.params.sessionFile,
         messages: await this.readMirroredSessionMessages(),
         compactedCount: -1,
         ctx: {
@@ -790,15 +785,8 @@ export class CodexAppServerEventProjector {
       return;
     }
     const itemId = readString(item, "id") ?? `raw-assistant-${this.assistantItemOrder.length + 1}`;
-    const phase = readString(item, "phase");
-    if (phase) {
-      this.assistantPhaseByItem.set(itemId, phase);
-    }
     this.rememberAssistantItem(itemId);
     this.assistantTextByItem.set(itemId, text);
-    if (phase === "commentary") {
-      this.emitCommentaryProgress({ itemId, text });
-    }
   }
 
   private recordNativeGeneratedMedia(item: CodexThreadItem | undefined): void {
@@ -1429,11 +1417,20 @@ export class CodexAppServerEventProjector {
   }
 
   private async readMirroredSessionMessages(): Promise<AgentMessage[]> {
-    return (await readCodexMirroredSessionHistoryMessages(this.params.sessionFile)) ?? [];
+    const { sessionAgentId } = resolveSessionAgentIds({
+      agentId: this.params.agentId,
+      config: this.params.config,
+      sessionKey: this.params.sessionKey,
+    });
+    return (
+      (await readCodexMirroredSessionHistoryMessages({
+        agentId: sessionAgentId,
+        sessionId: this.params.sessionId,
+      })) ?? []
+    );
   }
 
   private createAssistantMessage(text: string): AssistantMessage {
-    const attribution = resolveCodexLocalRuntimeAttribution(this.params);
     const usage: Usage = this.tokenUsage
       ? {
           input: this.tokenUsage.input ?? 0,
@@ -1452,8 +1449,8 @@ export class CodexAppServerEventProjector {
     return {
       role: "assistant",
       content: [{ type: "text", text }],
-      api: attribution.api ?? "openai-codex-responses",
-      provider: attribution.provider,
+      api: this.params.model.api ?? "openai-codex-responses",
+      provider: this.params.provider,
       model: this.params.modelId,
       usage,
       stopReason: this.aborted ? "aborted" : this.promptError ? "error" : "stop",
@@ -1463,12 +1460,11 @@ export class CodexAppServerEventProjector {
   }
 
   private createAssistantMirrorMessage(title: string, text: string): AssistantMessage {
-    const attribution = resolveCodexLocalRuntimeAttribution(this.params);
     return {
       role: "assistant",
       content: [{ type: "text", text: `${title}:\n${text}` }],
-      api: attribution.api ?? "openai-codex-responses",
-      provider: attribution.provider,
+      api: this.params.model.api ?? "openai-codex-responses",
+      provider: this.params.provider,
       model: this.params.modelId,
       usage: ZERO_USAGE,
       stopReason: "stop",
@@ -1478,7 +1474,6 @@ export class CodexAppServerEventProjector {
 
   private createToolCallMessage(params: ToolTranscriptCallInput): AgentMessage {
     const args = normalizeToolTranscriptArguments(params.arguments);
-    const attribution = resolveCodexLocalRuntimeAttribution(this.params);
     return {
       role: "assistant",
       content: [
@@ -1490,8 +1485,8 @@ export class CodexAppServerEventProjector {
           input: args,
         },
       ],
-      api: attribution.api ?? "openai-codex-responses",
-      provider: attribution.provider,
+      api: this.params.model.api ?? "openai-codex-responses",
+      provider: this.params.provider,
       model: this.params.modelId,
       usage: ZERO_USAGE,
       stopReason: "toolUse",

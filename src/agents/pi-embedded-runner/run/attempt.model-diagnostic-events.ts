@@ -1,4 +1,3 @@
-import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { fireAndForgetBoundedHook } from "../../../hooks/fire-and-forget.js";
 import {
   diagnosticErrorCategory,
@@ -28,6 +27,7 @@ import type {
   PluginHookModelCallEndedEvent,
   PluginHookModelCallStartedEvent,
 } from "../../../plugins/hook-types.js";
+import type { StreamFn } from "../../agent-core-contract.js";
 
 export { diagnosticErrorCategory };
 

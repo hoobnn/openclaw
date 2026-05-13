@@ -12,10 +12,11 @@ let loadModelCatalog: typeof import("./model-catalog.js").loadModelCatalog;
 let modelSupportsInput: typeof import("./model-catalog.js").modelSupportsInput;
 let resetModelCatalogCacheForTest: typeof import("./model-catalog.js").resetModelCatalogCacheForTest;
 let augmentCatalogMock: ReturnType<typeof vi.fn>;
-let ensureOpenClawModelsJsonMock: ReturnType<typeof vi.fn>;
-let currentPluginMetadataSnapshotMock: ReturnType<typeof vi.fn<(...args: unknown[]) => unknown>>;
-let loadPluginMetadataSnapshotMock: ReturnType<typeof vi.fn<(...args: unknown[]) => unknown>>;
+let ensureOpenClawModelCatalogMock: ReturnType<typeof vi.fn>;
+let currentPluginMetadataSnapshotMock: ReturnType<typeof vi.fn>;
+let loadPluginMetadataSnapshotMock: ReturnType<typeof vi.fn>;
 let readFileMock: ReturnType<typeof vi.fn>;
+let storedModelsConfigRaw: string | undefined;
 
 vi.mock("./model-suppression.runtime.js", () => ({
   shouldSuppressBuiltInModel: (params: { provider?: string; id?: string }) =>
@@ -174,9 +175,13 @@ describe("loadModelCatalog", () => {
       ...(await importOriginal<typeof import("node:fs/promises")>()),
       readFile: readFileMock,
     }));
-    ensureOpenClawModelsJsonMock = vi.fn().mockResolvedValue({ agentDir: "/tmp", wrote: false });
+    ensureOpenClawModelCatalogMock = vi.fn().mockResolvedValue({ agentDir: "/tmp", wrote: false });
     vi.doMock("./models-config.js", () => ({
-      ensureOpenClawModelsJson: ensureOpenClawModelsJsonMock,
+      ensureOpenClawModelCatalog: ensureOpenClawModelCatalogMock,
+    }));
+    vi.doMock("./models-config-store.js", () => ({
+      readStoredModelsConfigRaw: () =>
+        storedModelsConfigRaw ? { raw: storedModelsConfigRaw, updatedAt: 1 } : undefined,
     }));
     vi.doMock("./agent-scope.js", () => ({
       resolveDefaultAgentDir: () => "/tmp/openclaw",
@@ -212,9 +217,10 @@ describe("loadModelCatalog", () => {
     resetModelCatalogCacheForTest();
     readFileMock.mockReset();
     readFileMock.mockRejectedValue(
-      Object.assign(new Error("models.json missing"), { code: "ENOENT" }),
+      Object.assign(new Error("stored model catalog missing"), { code: "ENOENT" }),
     );
-    ensureOpenClawModelsJsonMock.mockClear();
+    storedModelsConfigRaw = undefined;
+    ensureOpenClawModelCatalogMock.mockClear();
     augmentCatalogMock.mockClear();
     currentPluginMetadataSnapshotMock.mockReset();
     currentPluginMetadataSnapshotMock.mockReturnValue(undefined);
@@ -231,6 +237,7 @@ describe("loadModelCatalog", () => {
   afterAll(() => {
     vi.doUnmock("node:fs/promises");
     vi.doUnmock("./models-config.js");
+    vi.doUnmock("./models-config-store.js");
     vi.doUnmock("./agent-scope.js");
     vi.doUnmock("../plugins/provider-runtime.runtime.js");
     vi.doUnmock("../plugins/current-plugin-metadata-snapshot.js");
@@ -332,7 +339,7 @@ describe("loadModelCatalog", () => {
     }
   });
 
-  it("does not prepare models.json or import provider discovery when loading fallback catalog in read-only mode", async () => {
+  it("does not prepare the stored model catalog or import provider discovery when loading fallback catalog in read-only mode", async () => {
     const importPiSdk = vi.fn(async () => {
       throw new Error("provider discovery should not load");
     });
@@ -368,44 +375,42 @@ describe("loadModelCatalog", () => {
 
     const entry = requireCatalogEntry(result, "openai", "gpt-test");
     expect(entry.name).toBe("GPT Test");
-    expect(ensureOpenClawModelsJsonMock).not.toHaveBeenCalled();
+    expect(ensureOpenClawModelCatalogMock).not.toHaveBeenCalled();
     expect(importPiSdk).not.toHaveBeenCalled();
     expect(loadPluginMetadataSnapshotMock).not.toHaveBeenCalled();
   });
 
   it("filters suppressed built-ins from persisted read-only catalog rows", async () => {
-    readFileMock.mockResolvedValueOnce(
-      JSON.stringify({
-        providers: {
-          "openai-codex": {
-            models: [
-              {
-                id: "gpt-5.3-codex-spark",
-                name: "GPT-5.3 Codex Spark",
-                reasoning: true,
-                contextWindow: 128000,
-                input: ["text"],
-              },
-              {
-                id: "gpt-5.4",
-                name: "GPT-5.4",
-                reasoning: true,
-                contextWindow: 272000,
-                input: ["text", "image"],
-              },
-            ],
-          },
-          openai: {
-            models: [
-              {
-                id: "gpt-5.3-codex-spark",
-                name: "GPT-5.3 Codex Spark",
-              },
-            ],
-          },
+    storedModelsConfigRaw = JSON.stringify({
+      providers: {
+        "openai-codex": {
+          models: [
+            {
+              id: "gpt-5.3-codex-spark",
+              name: "GPT-5.3 Codex Spark",
+              reasoning: true,
+              contextWindow: 128000,
+              input: ["text"],
+            },
+            {
+              id: "gpt-5.4",
+              name: "GPT-5.4",
+              reasoning: true,
+              contextWindow: 272000,
+              input: ["text", "image"],
+            },
+          ],
         },
-      }),
-    );
+        openai: {
+          models: [
+            {
+              id: "gpt-5.3-codex-spark",
+              name: "GPT-5.3 Codex Spark",
+            },
+          ],
+        },
+      },
+    });
 
     const result = await loadModelCatalog({ config: {} as OpenClawConfig, readOnly: true });
 
@@ -420,24 +425,22 @@ describe("loadModelCatalog", () => {
         compat: undefined,
       },
     ]);
-    expect(ensureOpenClawModelsJsonMock).not.toHaveBeenCalled();
+    expect(ensureOpenClawModelCatalogMock).not.toHaveBeenCalled();
     expect(augmentCatalogMock).not.toHaveBeenCalled();
   });
 
   it("falls back to manifest catalog rows when persisted read-only catalog has no model rows", async () => {
-    readFileMock.mockResolvedValueOnce(
-      JSON.stringify({
-        providers: {
-          openai: {
-            modelOverrides: {
-              "gpt-4.1": {
-                contextWindow: 128000,
-              },
+    storedModelsConfigRaw = JSON.stringify({
+      providers: {
+        openai: {
+          modelOverrides: {
+            "gpt-4.1": {
+              contextWindow: 128000,
             },
           },
         },
-      }),
-    );
+      },
+    });
     currentPluginMetadataSnapshotMock.mockReturnValueOnce({
       policyHash: "policy",
       index: {
@@ -480,20 +483,18 @@ describe("loadModelCatalog", () => {
         reasoning: false,
       },
     ]);
-    expect(ensureOpenClawModelsJsonMock).not.toHaveBeenCalled();
+    expect(ensureOpenClawModelCatalogMock).not.toHaveBeenCalled();
     expect(importPiSdk).not.toHaveBeenCalled();
   });
 
   it("preserves registry defaults for minimal persisted read-only catalog rows", async () => {
-    readFileMock.mockResolvedValueOnce(
-      JSON.stringify({
-        providers: {
-          custom: {
-            models: [{ id: "local-tiny" }],
-          },
+    storedModelsConfigRaw = JSON.stringify({
+      providers: {
+        custom: {
+          models: [{ id: "local-tiny" }],
         },
-      }),
-    );
+      },
+    });
 
     const result = await loadModelCatalog({ config: {} as OpenClawConfig, readOnly: true });
 
@@ -508,7 +509,7 @@ describe("loadModelCatalog", () => {
         compat: undefined,
       },
     ]);
-    expect(ensureOpenClawModelsJsonMock).not.toHaveBeenCalled();
+    expect(ensureOpenClawModelCatalogMock).not.toHaveBeenCalled();
     expect(augmentCatalogMock).not.toHaveBeenCalled();
   });
 
@@ -678,19 +679,17 @@ describe("loadModelCatalog", () => {
   });
 
   it("preserves provider context defaults for persisted read-only catalog rows", async () => {
-    readFileMock.mockResolvedValueOnce(
-      JSON.stringify({
-        providers: {
-          custom: {
-            contextWindow: 262144,
-            models: [
-              { id: "inherits-provider-context" },
-              { id: "overrides-context", contextWindow: 65536 },
-            ],
-          },
+    storedModelsConfigRaw = JSON.stringify({
+      providers: {
+        custom: {
+          contextWindow: 262144,
+          models: [
+            { id: "inherits-provider-context" },
+            { id: "overrides-context", contextWindow: 65536 },
+          ],
         },
-      }),
-    );
+      },
+    });
 
     const result = await loadModelCatalog({ config: {} as OpenClawConfig, readOnly: true });
 
@@ -714,7 +713,7 @@ describe("loadModelCatalog", () => {
         compat: undefined,
       },
     ]);
-    expect(ensureOpenClawModelsJsonMock).not.toHaveBeenCalled();
+    expect(ensureOpenClawModelCatalogMock).not.toHaveBeenCalled();
     expect(augmentCatalogMock).not.toHaveBeenCalled();
   });
 

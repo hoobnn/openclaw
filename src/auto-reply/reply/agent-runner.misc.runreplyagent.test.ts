@@ -8,10 +8,13 @@ import {
   isEmbeddedPiRunActive,
 } from "../../agents/pi-embedded-runner/runs.js";
 import { clearRuntimeConfigSnapshot } from "../../config/config.js";
-import type { OpenClawConfig } from "../../config/config.js";
-import * as sessionTypesModule from "../../config/sessions.js";
 import type { SessionEntry } from "../../config/sessions.js";
-import { loadSessionStore, saveSessionStore } from "../../config/sessions.js";
+import {
+  deleteSessionEntry,
+  listSessionEntries,
+  upsertSessionEntry,
+} from "../../config/sessions/store.js";
+import { replaceSqliteSessionTranscriptEvents } from "../../config/sessions/transcript-store.sqlite.js";
 import {
   onInternalDiagnosticEvent,
   resetDiagnosticEventsForTest,
@@ -28,6 +31,61 @@ import type { FollowupRun, QueueSettings } from "./queue.js";
 import { scheduleFollowupDrain } from "./queue.js";
 import { testing as replyRunRegistryTesting, replyRunRegistry } from "./reply-run-registry.js";
 import { createMockTypingController } from "./test-helpers.js";
+
+const tempStateDirs: string[] = [];
+let previousStateDir: string | undefined;
+let previousStateDirCaptured = false;
+
+async function createTestStateDir(prefix: string): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  tempStateDirs.push(root);
+  if (!previousStateDirCaptured) {
+    previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    previousStateDirCaptured = true;
+  }
+  process.env.OPENCLAW_STATE_DIR = root;
+  return root;
+}
+
+type TestSessionRowsTarget = {
+  agentId: string;
+  transcriptDir: string;
+};
+
+function resolveTestSessionRowsTarget(root: string, agentId = "main"): TestSessionRowsTarget {
+  return {
+    agentId,
+    transcriptDir: path.join(root, "transcript-fixtures", agentId),
+  };
+}
+
+async function replaceTestSessionRows(
+  target: TestSessionRowsTarget,
+  store: Record<string, SessionEntry>,
+): Promise<void> {
+  const { agentId } = target;
+  for (const { sessionKey } of listSessionEntries({ agentId })) {
+    deleteSessionEntry({ agentId, sessionKey });
+  }
+  for (const [sessionKey, entry] of Object.entries(store)) {
+    upsertSessionEntry({ agentId, sessionKey, entry });
+  }
+}
+
+function readTestSessionRows(target: TestSessionRowsTarget): Record<string, SessionEntry> {
+  const { agentId } = target;
+  return Object.fromEntries(
+    listSessionEntries({ agentId }).map(({ sessionKey, entry }) => [sessionKey, entry]),
+  );
+}
+
+function seedTestTranscript(events: unknown[] = [], sessionId = "session"): void {
+  replaceSqliteSessionTranscriptEvents({
+    agentId: "main",
+    sessionId,
+    events,
+  });
+}
 
 function createCliBackendTestConfig() {
   return {
@@ -126,7 +184,7 @@ const loadCronStoreMock = vi.fn();
 vi.mock("../../cron/store.js", () => {
   return {
     loadCronStore: (...args: unknown[]) => loadCronStoreMock(...args),
-    resolveCronStorePath: (storePath?: string) => storePath ?? "/tmp/openclaw-cron-store.json",
+    resolveCronStoreKey: () => "default",
   };
 });
 
@@ -223,7 +281,7 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => {
+afterEach(async () => {
   clearRuntimeConfigSnapshot();
   resetDiagnosticEventsForTest();
   resetSystemEventsForTest();
@@ -231,27 +289,34 @@ afterEach(() => {
   clearMemoryPluginState();
   replyRunRegistryTesting.resetReplyRunRegistry();
   embeddedRunTesting.resetActiveEmbeddedRuns();
+  if (previousStateDirCaptured) {
+    if (previousStateDir === undefined) {
+      delete process.env.OPENCLAW_STATE_DIR;
+    } else {
+      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+    }
+    previousStateDir = undefined;
+    previousStateDirCaptured = false;
+  }
+  await Promise.all(
+    tempStateDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
 });
 
 describe("runReplyAgent auto-compaction token update", () => {
   async function seedSessionStore(params: {
-    storePath: string;
+    target: TestSessionRowsTarget;
     sessionKey: string;
     entry: Record<string, unknown>;
   }) {
-    await fs.mkdir(path.dirname(params.storePath), { recursive: true });
-    await fs.writeFile(
-      params.storePath,
-      JSON.stringify({ [params.sessionKey]: params.entry }, null, 2),
-      "utf-8",
-    );
+    await replaceTestSessionRows(params.target, {
+      [params.sessionKey]: params.entry as SessionEntry,
+    });
   }
 
   function createBaseRun(params: {
-    storePath: string;
     sessionEntry: Record<string, unknown>;
     config?: Record<string, unknown>;
-    sessionFile?: string;
     workspaceDir?: string;
   }) {
     const typing = createMockTypingController();
@@ -272,7 +337,6 @@ describe("runReplyAgent auto-compaction token update", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "whatsapp",
-        sessionFile: params.sessionFile ?? "/tmp/session.jsonl",
         workspaceDir: params.workspaceDir ?? "/tmp",
         config: params.config ?? {},
         skillsSnapshot: {},
@@ -297,8 +361,8 @@ describe("runReplyAgent auto-compaction token update", () => {
     tmpPrefix: string;
     workspaceDir?: string;
   }) {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), params.tmpPrefix));
-    const storePath = path.join(tmp, "sessions.json");
+    const tmp = await createTestStateDir(params.tmpPrefix);
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry = {
       sessionId: "session",
@@ -306,7 +370,7 @@ describe("runReplyAgent auto-compaction token update", () => {
       totalTokens: 50_000,
     };
 
-    await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+    await seedSessionStore({ target: sessionRowsTarget, sessionKey, entry: sessionEntry });
 
     runEmbeddedPiAgentMock.mockResolvedValue({
       payloads: [{ text: "ok" }],
@@ -322,7 +386,6 @@ describe("runReplyAgent auto-compaction token update", () => {
         })
       : undefined;
     const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
-      storePath,
       sessionEntry,
       config: params.config,
       workspaceDir: params.workspaceDir,
@@ -343,7 +406,6 @@ describe("runReplyAgent auto-compaction token update", () => {
         sessionEntry,
         sessionStore: { [sessionKey]: sessionEntry },
         sessionKey,
-        storePath,
         defaultModel: "anthropic/claude-opus-4-6",
         agentCfgContextTokens: 200_000,
         resolvedVerboseLevel: "off",
@@ -357,7 +419,7 @@ describe("runReplyAgent auto-compaction token update", () => {
       unsubscribe?.();
     }
 
-    const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+    const stored = readTestSessionRows(sessionRowsTarget);
     const usageEvent = diagnostics.find((event) => event.type === "model.usage");
     return { sessionKey, stored, usageEvent };
   }
@@ -394,7 +456,6 @@ describe("runReplyAgent auto-compaction token update", () => {
     });
 
     const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
-      storePath: "",
       sessionEntry,
     });
 
@@ -585,7 +646,6 @@ describe("runReplyAgent block streaming", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "discord",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: {
           agents: {
@@ -688,7 +748,6 @@ describe("runReplyAgent block streaming", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "discord",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: {
           agents: {
@@ -754,8 +813,8 @@ describe("runReplyAgent block streaming", () => {
 
 describe("runReplyAgent Active Memory inline debug", () => {
   it("appends inline Active Memory status payload when verbose is enabled", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-active-memory-inline-"));
-    const storePath = path.join(tmp, "sessions.json");
+    const tmp = await createTestStateDir("openclaw-active-memory-inline-");
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -763,20 +822,10 @@ describe("runReplyAgent Active Memory inline debug", () => {
       verboseLevel: "on",
     };
 
-    await fs.writeFile(
-      storePath,
-      JSON.stringify(
-        {
-          [sessionKey]: sessionEntry,
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
+    await replaceTestSessionRows(sessionRowsTarget, { [sessionKey]: sessionEntry });
 
     runEmbeddedPiAgentMock.mockImplementationOnce(async () => {
-      const latest = loadSessionStore(storePath, { skipCache: true });
+      const latest = readTestSessionRows(sessionRowsTarget);
       latest[sessionKey] = {
         ...latest[sessionKey],
         pluginDebugEntries: [
@@ -789,7 +838,7 @@ describe("runReplyAgent Active Memory inline debug", () => {
           },
         ],
       };
-      await saveSessionStore(storePath, latest);
+      await replaceTestSessionRows(sessionRowsTarget, latest);
       return {
         payloads: [{ text: "Normal reply" }],
         meta: {},
@@ -813,7 +862,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "telegram",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: {},
         skillsSnapshot: {},
@@ -847,7 +895,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       sessionEntry,
       sessionStore: { [sessionKey]: sessionEntry },
       sessionKey,
-      storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       resolvedVerboseLevel: "on",
       isNewSession: false,
@@ -865,8 +912,8 @@ describe("runReplyAgent Active Memory inline debug", () => {
   });
 
   it("appends inline Active Memory status and trace payloads when verbose and trace are enabled", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-active-memory-inline-"));
-    const storePath = path.join(tmp, "sessions.json");
+    const tmp = await createTestStateDir("openclaw-active-memory-inline-");
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -875,20 +922,10 @@ describe("runReplyAgent Active Memory inline debug", () => {
       traceLevel: "on",
     };
 
-    await fs.writeFile(
-      storePath,
-      JSON.stringify(
-        {
-          [sessionKey]: sessionEntry,
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
+    await replaceTestSessionRows(sessionRowsTarget, { [sessionKey]: sessionEntry });
 
     runEmbeddedPiAgentMock.mockImplementationOnce(async () => {
-      const latest = loadSessionStore(storePath, { skipCache: true });
+      const latest = readTestSessionRows(sessionRowsTarget);
       latest[sessionKey] = {
         ...latest[sessionKey],
         pluginDebugEntries: [
@@ -901,7 +938,7 @@ describe("runReplyAgent Active Memory inline debug", () => {
           },
         ],
       };
-      await saveSessionStore(storePath, latest);
+      await replaceTestSessionRows(sessionRowsTarget, latest);
       return {
         payloads: [{ text: "Normal reply" }],
         meta: {},
@@ -925,7 +962,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "telegram",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: {},
         skillsSnapshot: {},
@@ -959,7 +995,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       sessionEntry,
       sessionStore: { [sessionKey]: sessionEntry },
       sessionKey,
-      storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       resolvedVerboseLevel: "on",
       isNewSession: false,
@@ -977,8 +1012,8 @@ describe("runReplyAgent Active Memory inline debug", () => {
   });
 
   it("appends inline Active Memory trace payload when only trace is enabled", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-active-memory-inline-"));
-    const storePath = path.join(tmp, "sessions.json");
+    const tmp = await createTestStateDir("openclaw-active-memory-inline-");
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -986,20 +1021,10 @@ describe("runReplyAgent Active Memory inline debug", () => {
       traceLevel: "on",
     };
 
-    await fs.writeFile(
-      storePath,
-      JSON.stringify(
-        {
-          [sessionKey]: sessionEntry,
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
+    await replaceTestSessionRows(sessionRowsTarget, { [sessionKey]: sessionEntry });
 
     runEmbeddedPiAgentMock.mockImplementationOnce(async () => {
-      const latest = loadSessionStore(storePath, { skipCache: true });
+      const latest = readTestSessionRows(sessionRowsTarget);
       latest[sessionKey] = {
         ...latest[sessionKey],
         pluginDebugEntries: [
@@ -1012,7 +1037,7 @@ describe("runReplyAgent Active Memory inline debug", () => {
           },
         ],
       };
-      await saveSessionStore(storePath, latest);
+      await replaceTestSessionRows(sessionRowsTarget, latest);
       return {
         payloads: [{ text: "Normal reply" }],
         meta: {},
@@ -1036,7 +1061,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "telegram",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: {},
         skillsSnapshot: {},
@@ -1070,7 +1094,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       sessionEntry,
       sessionStore: { [sessionKey]: sessionEntry },
       sessionKey,
-      storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       resolvedVerboseLevel: "on",
       isNewSession: false,
@@ -1088,9 +1111,8 @@ describe("runReplyAgent Active Memory inline debug", () => {
   });
 
   it("appends raw trace payloads when trace raw is enabled", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-trace-raw-usage-"));
-    const storePath = path.join(tmp, "sessions.json");
-    const sessionFile = path.join(tmp, "session.jsonl");
+    const tmp = await createTestStateDir("openclaw-trace-raw-usage-");
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -1099,37 +1121,23 @@ describe("runReplyAgent Active Memory inline debug", () => {
       compactionCount: 3,
     };
 
-    await fs.writeFile(
-      storePath,
-      JSON.stringify(
-        {
-          [sessionKey]: sessionEntry,
+    await replaceTestSessionRows(sessionRowsTarget, { [sessionKey]: sessionEntry });
+    seedTestTranscript([
+      {
+        message: {
+          role: "user",
+          content: "Earlier turn",
+          usage: { input: 400, output: 20, cacheRead: 100, cacheWrite: 50, total: 570 },
         },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
-    await fs.writeFile(
-      sessionFile,
-      [
-        JSON.stringify({
-          message: {
-            role: "user",
-            content: "Earlier turn",
-            usage: { input: 400, output: 20, cacheRead: 100, cacheWrite: 50, total: 570 },
-          },
-        }),
-        JSON.stringify({
-          message: {
-            role: "assistant",
-            content: "Earlier reply",
-            usage: { input: 200, output: 10, cacheRead: 20, cacheWrite: 5, total: 235 },
-          },
-        }),
-      ].join("\n"),
-      "utf-8",
-    );
+      },
+      {
+        message: {
+          role: "assistant",
+          content: "Earlier reply",
+          usage: { input: 200, output: 10, cacheRead: 20, cacheWrite: 5, total: 235 },
+        },
+      },
+    ]);
 
     runWithModelFallbackMock.mockImplementationOnce(
       async ({ run }: RunWithModelFallbackParams) => ({
@@ -1210,7 +1218,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "telegram",
-        sessionFile,
         workspaceDir: "/tmp",
         config: {},
         skillsSnapshot: {},
@@ -1245,7 +1252,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       sessionEntry,
       sessionStore: { [sessionKey]: sessionEntry },
       sessionKey,
-      storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       resolvedVerboseLevel: "off",
       isNewSession: false,
@@ -1335,9 +1341,8 @@ describe("runReplyAgent Active Memory inline debug", () => {
   });
 
   it("does not emit persisted trace output to an unauthorized sender", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-trace-raw-unauthorized-"));
-    const storePath = path.join(tmp, "sessions.json");
-    const sessionFile = path.join(tmp, "session.jsonl");
+    const tmp = await createTestStateDir("openclaw-trace-raw-unauthorized-");
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -1345,8 +1350,8 @@ describe("runReplyAgent Active Memory inline debug", () => {
       traceLevel: "raw",
     };
 
-    await fs.writeFile(storePath, JSON.stringify({ [sessionKey]: sessionEntry }, null, 2), "utf-8");
-    await fs.writeFile(sessionFile, "", "utf-8");
+    await replaceTestSessionRows(sessionRowsTarget, { [sessionKey]: sessionEntry });
+    seedTestTranscript();
 
     runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "Visible reply" }],
@@ -1381,7 +1386,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "telegram",
-        sessionFile,
         workspaceDir: "/tmp",
         config: {},
         skillsSnapshot: {},
@@ -1416,7 +1420,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       sessionEntry,
       sessionStore: { [sessionKey]: sessionEntry },
       sessionKey,
-      storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       resolvedVerboseLevel: "off",
       isNewSession: false,
@@ -1431,9 +1434,8 @@ describe("runReplyAgent Active Memory inline debug", () => {
   });
 
   it("shows session and last-turn usage totals without per-call usage blocks", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-trace-raw-usage-"));
-    const storePath = path.join(tmp, "sessions.json");
-    const sessionFile = path.join(tmp, "session.jsonl");
+    const tmp = await createTestStateDir("openclaw-trace-raw-usage-");
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -1441,28 +1443,16 @@ describe("runReplyAgent Active Memory inline debug", () => {
       traceLevel: "raw",
     };
 
-    await fs.writeFile(
-      storePath,
-      JSON.stringify(
-        {
-          [sessionKey]: sessionEntry,
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
-    await fs.writeFile(
-      sessionFile,
-      `${JSON.stringify({
+    await replaceTestSessionRows(sessionRowsTarget, { [sessionKey]: sessionEntry });
+    seedTestTranscript([
+      {
         message: {
           role: "assistant",
           content: "Earlier reply",
           usage: { input: 20, output: 5, cacheRead: 3, total: 28 },
         },
-      })}\n`,
-      "utf-8",
-    );
+      },
+    ]);
 
     runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "Visible reply" }],
@@ -1498,7 +1488,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "telegram",
-        sessionFile,
         workspaceDir: "/tmp",
         config: {},
         skillsSnapshot: {},
@@ -1532,7 +1521,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       sessionEntry,
       sessionStore: { [sessionKey]: sessionEntry },
       sessionKey,
-      storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       agentCfgContextTokens: 200_000,
       resolvedVerboseLevel: "off",
@@ -1551,9 +1539,8 @@ describe("runReplyAgent Active Memory inline debug", () => {
   });
 
   it("escapes markdown fence delimiters inside raw trace blocks", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-trace-raw-fence-"));
-    const storePath = path.join(tmp, "sessions.json");
-    const sessionFile = path.join(tmp, "session.jsonl");
+    const tmp = await createTestStateDir("openclaw-trace-raw-fence-");
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -1561,8 +1548,8 @@ describe("runReplyAgent Active Memory inline debug", () => {
       traceLevel: "raw",
     };
 
-    await fs.writeFile(storePath, JSON.stringify({ [sessionKey]: sessionEntry }, null, 2), "utf-8");
-    await fs.writeFile(sessionFile, "", "utf-8");
+    await replaceTestSessionRows(sessionRowsTarget, { [sessionKey]: sessionEntry });
+    seedTestTranscript();
 
     runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "Visible reply" }],
@@ -1597,7 +1584,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "telegram",
-        sessionFile,
         workspaceDir: "/tmp",
         config: {},
         skillsSnapshot: {},
@@ -1632,7 +1618,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       sessionEntry,
       sessionStore: { [sessionKey]: sessionEntry },
       sessionKey,
-      storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       resolvedVerboseLevel: "off",
       isNewSession: false,
@@ -1647,28 +1632,17 @@ describe("runReplyAgent Active Memory inline debug", () => {
     expect(traceText).toContain("assistant\n\\~~~\nresponse");
   });
 
-  it("does not reload the session store when verbose is disabled", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-active-memory-inline-"));
-    const storePath = path.join(tmp, "sessions.json");
+  it("does not append inline debug when verbose is disabled", async () => {
+    const tmp = await createTestStateDir("openclaw-active-memory-inline-");
+    const sessionRowsTarget = resolveTestSessionRowsTarget(tmp);
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
     };
 
-    await fs.writeFile(
-      storePath,
-      JSON.stringify(
-        {
-          [sessionKey]: sessionEntry,
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
+    await replaceTestSessionRows(sessionRowsTarget, { [sessionKey]: sessionEntry });
 
-    const loadSessionStoreSpy = vi.spyOn(sessionTypesModule, "loadSessionStore");
     runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "Normal reply" }],
       meta: {},
@@ -1691,7 +1665,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "telegram",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: {},
         skillsSnapshot: {},
@@ -1724,7 +1697,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       sessionEntry,
       sessionStore: { [sessionKey]: sessionEntry },
       sessionKey,
-      storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       resolvedVerboseLevel: "off",
       isNewSession: false,
@@ -1734,7 +1706,6 @@ describe("runReplyAgent Active Memory inline debug", () => {
       typingMode: "instant",
     });
 
-    expect(loadSessionStoreSpy).not.toHaveBeenCalledWith(storePath, { skipCache: true });
     expectReplyText(result, "Normal reply");
   });
 });
@@ -1757,7 +1728,6 @@ describe("runReplyAgent claude-cli routing", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "webchat",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: { agents: { defaults: { cliBackends: { "claude-cli": {} } } } },
         skillsSnapshot: {},
@@ -1876,7 +1846,6 @@ describe("runReplyAgent claude-cli routing", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "webchat",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: createCliBackendTestConfig(),
         skillsSnapshot: {},
@@ -1959,7 +1928,6 @@ describe("runReplyAgent claude-cli routing", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "webchat",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: {
           agents: {
@@ -2018,10 +1986,7 @@ describe("runReplyAgent claude-cli routing", () => {
 });
 
 describe("runReplyAgent messaging tool dedupe", () => {
-  function createRun(
-    messageProvider = "slack",
-    opts: { storePath?: string; sessionKey?: string } = {},
-  ) {
+  function createRun(messageProvider = "slack", opts: { sessionKey?: string } = {}) {
     const typing = createMockTypingController();
     const sessionKey = opts.sessionKey ?? "main";
     const sessionCtx = {
@@ -2039,7 +2004,6 @@ describe("runReplyAgent messaging tool dedupe", () => {
         sessionId: "session",
         sessionKey,
         messageProvider,
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: createCliBackendTestConfig(),
         skillsSnapshot: {},
@@ -2070,7 +2034,6 @@ describe("runReplyAgent messaging tool dedupe", () => {
       typing,
       sessionCtx,
       sessionKey,
-      storePath: opts.storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       resolvedVerboseLevel: "off",
       isNewSession: false,
@@ -2173,7 +2136,6 @@ describe("runReplyAgent reminder commitment guard", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "telegram",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: createCliBackendTestConfig(),
         skillsSnapshot: {},
@@ -2395,7 +2357,6 @@ describe("runReplyAgent fallback reasoning tags", () => {
         sessionId: "session",
         sessionKey,
         messageProvider: "whatsapp",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: createCliBackendTestConfig(),
         skillsSnapshot: {},
@@ -2535,7 +2496,6 @@ describe("runReplyAgent response usage footer", () => {
         sessionId: "session",
         sessionKey: params.sessionKey,
         messageProvider: "whatsapp",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: params.config ?? createCliBackendTestConfig(),
         skillsSnapshot: {},
@@ -2717,7 +2677,6 @@ describe("runReplyAgent transient HTTP retry", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "telegram",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: createCliBackendTestConfig(),
         skillsSnapshot: {},
@@ -2793,7 +2752,6 @@ describe("runReplyAgent billing error classification", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "telegram",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: createCliBackendTestConfig(),
         skillsSnapshot: {},
@@ -2854,7 +2812,6 @@ describe("runReplyAgent mid-turn rate-limit fallback", () => {
         sessionId: "session",
         sessionKey: "main",
         messageProvider: "telegram",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: createCliBackendTestConfig(),
         skillsSnapshot: {},

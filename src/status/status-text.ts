@@ -198,7 +198,6 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
     sessionKey,
     parentSessionKey,
     sessionScope,
-    storePath,
     statusChannel,
     provider,
     model,
@@ -426,7 +425,6 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
     sessionKey,
     parentSessionKey,
     sessionScope,
-    sessionStorePath: storePath,
     groupActivation,
     resolvedThink:
       resolvedThinkLevel ?? explicitThinkingDefault ?? (await resolveDefaultThinkingLevel()),

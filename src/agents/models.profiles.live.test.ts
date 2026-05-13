@@ -1,12 +1,4 @@
 import { writeSync } from "node:fs";
-import {
-  type Api,
-  completeSimple,
-  getModels,
-  getProviders,
-  type KnownProvider,
-  type Model,
-} from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { getRuntimeConfig } from "../config/config.js";
@@ -54,8 +46,13 @@ import {
 } from "./live-test-provider-drift.js";
 import { getApiKeyForModel, requireApiKey } from "./model-auth.js";
 import { shouldSuppressBuiltInModel } from "./model-suppression.js";
-import { ensureOpenClawModelsJson } from "./models-config.js";
-import { isRateLimitErrorMessage } from "./pi-embedded-helpers/errors.js";
+import { ensureOpenClawModelCatalog } from "./models-config.js";
+import { type Api, completeSimple, type Model } from "./pi-ai-contract.js";
+import {
+  isCloudflareOrHtmlErrorPage,
+  isRateLimitErrorMessage,
+} from "./pi-embedded-helpers/errors.js";
+import { isAuthErrorMessage } from "./pi-embedded-helpers/failover-matches.js";
 import {
   discoverAuthStorage,
   discoverModels,
@@ -78,8 +75,8 @@ const DEFAULT_LIVE_MODEL_CONCURRENCY = 20;
 const LIVE_MODEL_CONCURRENCY = resolveLiveModelConcurrency(
   process.env.OPENCLAW_LIVE_MODEL_CONCURRENCY,
 );
-const LIVE_MODELS_JSON_TIMEOUT_MS = resolveLiveModelsJsonTimeoutMs(
-  process.env.OPENCLAW_LIVE_MODELS_JSON_TIMEOUT_MS,
+const LIVE_MODEL_CATALOG_TIMEOUT_MS = resolveLiveModelCatalogTimeoutMs(
+  process.env.OPENCLAW_LIVE_MODEL_CATALOG_TIMEOUT_MS,
 );
 const LIVE_FILE_PROBE_ENABLED = isLiveModelProbeEnabled(process.env, LIVE_MODEL_FILE_PROBE_ENV);
 const LIVE_IMAGE_PROBE_ENABLED = isLiveModelProbeEnabled(process.env, LIVE_MODEL_IMAGE_PROBE_ENV);
@@ -102,11 +99,6 @@ function logProgress(message: string): void {
   writeSync(2, `[live] ${message}\n`);
 }
 
-function resolveKnownProvider(provider: string): KnownProvider | undefined {
-  const normalized = provider.trim();
-  return getProviders().find((knownProvider) => knownProvider === normalized);
-}
-
 function loadPrioritizedHighSignalModels(): Model<Api>[] {
   const idsByProvider = new Map<string, Set<string>>();
   for (const ref of listPrioritizedHighSignalLiveModelRefs()) {
@@ -118,14 +110,17 @@ function loadPrioritizedHighSignalModels(): Model<Api>[] {
     }
   }
 
+  const agentDir = resolveDefaultAgentDir(getRuntimeConfig());
+  const registryModels = discoverModels(discoverAuthStorage(agentDir), agentDir, {
+    normalizeModels: false,
+  }).getAll();
   const models: Model<Api>[] = [];
   const seen = new Set<string>();
   for (const [provider, ids] of idsByProvider) {
-    const knownProvider = resolveKnownProvider(provider);
-    if (!knownProvider) {
-      continue;
-    }
-    for (const model of getModels(knownProvider)) {
+    for (const model of registryModels) {
+      if (model.provider !== provider) {
+        continue;
+      }
       const id = model.id.toLowerCase();
       if (!ids.has(id)) {
         continue;
@@ -369,20 +364,20 @@ describe("resolveLiveModelConcurrency", () => {
   });
 });
 
-function resolveLiveModelsJsonTimeoutMs(
-  modelsJsonTimeoutRaw?: string,
+function resolveLiveModelCatalogTimeoutMs(
+  modelCatalogTimeoutRaw?: string,
   setupTimeoutMs = LIVE_SETUP_TIMEOUT_MS,
 ): number {
-  return Math.max(setupTimeoutMs, toInt(modelsJsonTimeoutRaw, 180_000));
+  return Math.max(setupTimeoutMs, toInt(modelCatalogTimeoutRaw, 120_000));
 }
 
-describe("resolveLiveModelsJsonTimeoutMs", () => {
-  it("defaults models.json preparation to a longer setup timeout", () => {
-    expect(resolveLiveModelsJsonTimeoutMs(undefined, 45_000)).toBe(180_000);
+describe("resolveLiveModelCatalogTimeoutMs", () => {
+  it("defaults model catalog preparation to a longer setup timeout", () => {
+    expect(resolveLiveModelCatalogTimeoutMs(undefined, 45_000)).toBe(120_000);
   });
 
   it("never goes below the shared live setup timeout", () => {
-    expect(resolveLiveModelsJsonTimeoutMs("30000", 45_000)).toBe(45_000);
+    expect(resolveLiveModelCatalogTimeoutMs("30000", 45_000)).toBe(45_000);
   });
 });
 
@@ -752,11 +747,11 @@ describeLive("live models (profile keys)", () => {
         Promise.resolve().then(() => getRuntimeConfig()),
         "[live-models] load config",
       );
-      logProgress("[live-models] preparing models.json");
+      logProgress("[live-models] preparing model catalog");
       await withLiveStageTimeout(
-        ensureOpenClawModelsJson(cfg),
-        "[live-models] prepare models.json",
-        LIVE_MODELS_JSON_TIMEOUT_MS,
+        ensureOpenClawModelCatalog(cfg),
+        "[live-models] prepare model catalog",
+        LIVE_MODEL_CATALOG_TIMEOUT_MS,
       );
       if (!DIRECT_ENABLED) {
         logProgress(

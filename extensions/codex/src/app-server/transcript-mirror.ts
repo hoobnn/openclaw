@@ -1,16 +1,14 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs/promises";
 import {
-  acquireSessionWriteLock,
   appendSessionTranscriptMessage,
   emitSessionTranscriptUpdate,
-  resolveSessionWriteLockOptions,
   runAgentHarnessBeforeMessageWriteHook,
   type AgentMessage,
   type EmbeddedRunAttemptParams,
-  type SessionWriteLockAcquireTimeoutConfig,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+
+const DEFAULT_AGENT_ID = "main";
 
 type MirroredAgentMessage = Extract<AgentMessage, { role: "user" | "assistant" | "toolResult" }>;
 type MirroredUserMessage = Extract<AgentMessage, { role: "user" }>;
@@ -146,13 +144,13 @@ function buildMirrorDedupeIdentity(message: MirroredAgentMessage): string {
 }
 
 export async function mirrorCodexAppServerTranscript(params: {
-  sessionFile: string;
+  agentId: string;
+  sessionId: string;
   sessionKey?: string;
-  agentId?: string;
   messages: AgentMessage[];
   idempotencyScope?: string;
-  config?: SessionWriteLockAcquireTimeoutConfig;
-}): Promise<CodexAppServerTranscriptMirrorResult> {
+  config?: unknown;
+}): Promise<void> {
   const messages = params.messages.filter(
     (message): message is MirroredAgentMessage =>
       message.role === "user" || message.role === "assistant" || message.role === "toolResult",
@@ -161,118 +159,56 @@ export async function mirrorCodexAppServerTranscript(params: {
     return { userMessagesPresent: [] };
   }
 
-  const lock = await acquireSessionWriteLock({
-    sessionFile: params.sessionFile,
-    ...resolveSessionWriteLockOptions(params.config),
-  });
-  const appendedUpdates: Array<{ messageId: string; message: AgentMessage; messageSeq: number }> =
-    [];
-  const userMessagesPresent: MirroredUserMessage[] = [];
-  try {
-    const mirrorState = await readTranscriptMirrorState(params.sessionFile);
-    let nextMessageSeq = mirrorState.messageCount;
-    for (const message of messages) {
-      const dedupeIdentity = buildMirrorDedupeIdentity(message);
-      const idempotencyKey = params.idempotencyScope
-        ? `${params.idempotencyScope}:${dedupeIdentity}`
-        : undefined;
-      const transcriptMessage = {
-        ...message,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
-      } as AgentMessage;
-      if (idempotencyKey && mirrorState.idempotencyKeys.has(idempotencyKey)) {
-        const persistedUserMessage = mirrorState.userMessagesByIdempotencyKey.get(idempotencyKey);
-        if (persistedUserMessage) {
-          userMessagesPresent.push(persistedUserMessage);
-        }
-        continue;
-      }
-      const nextMessage = runAgentHarnessBeforeMessageWriteHook({
-        message: transcriptMessage,
-        agentId: params.agentId,
-        sessionKey: params.sessionKey,
-      });
-      if (!nextMessage) {
-        continue;
-      }
-      const messageToAppend = (
-        idempotencyKey
-          ? {
-              ...(nextMessage as unknown as Record<string, unknown>),
-              idempotencyKey,
-            }
-          : nextMessage
-      ) as AgentMessage;
-      const { messageId, message: appendedMessage } = await appendSessionTranscriptMessage({
-        transcriptPath: params.sessionFile,
-        message: messageToAppend,
-        idempotencyLookup: idempotencyKey ? "caller-checked" : "scan",
-        config: params.config,
-      });
-      if (appendedMessage.role === "user") {
-        userMessagesPresent.push(appendedMessage);
-        if (idempotencyKey) {
-          mirrorState.userMessagesByIdempotencyKey.set(idempotencyKey, appendedMessage);
-        }
-      }
-      nextMessageSeq += 1;
-      appendedUpdates.push({ messageId, message: appendedMessage, messageSeq: nextMessageSeq });
-      if (idempotencyKey) {
-        mirrorState.idempotencyKeys.add(idempotencyKey);
-      }
-    }
-  } finally {
-    await lock.release();
+  const agentId = params.agentId.trim() || DEFAULT_AGENT_ID;
+  const sessionId = params.sessionId.trim();
+  if (!sessionId) {
+    throw new Error("Codex transcript mirror requires a session id.");
   }
 
-  for (const update of appendedUpdates) {
+  for (const message of messages) {
+    const dedupeIdentity = buildMirrorDedupeIdentity(message);
+    const idempotencyKey = params.idempotencyScope
+      ? `${params.idempotencyScope}:${dedupeIdentity}`
+      : undefined;
+    const transcriptMessage = {
+      ...message,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    } as AgentMessage;
+    const nextMessage = runAgentHarnessBeforeMessageWriteHook({
+      message: transcriptMessage,
+      agentId: params.agentId,
+      sessionKey: params.sessionKey,
+    });
+    if (!nextMessage) {
+      continue;
+    }
+    const messageToAppend = (
+      idempotencyKey
+        ? {
+            ...(nextMessage as unknown as Record<string, unknown>),
+            idempotencyKey,
+          }
+        : nextMessage
+    ) as AgentMessage;
+    await appendSessionTranscriptMessage({
+      agentId,
+      sessionId,
+      message: messageToAppend,
+    });
+  }
+
+  if (params.sessionKey) {
     emitSessionTranscriptUpdate({
-      sessionFile: params.sessionFile,
-      ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
-      message: update.message,
-      messageId: update.messageId,
-      messageSeq: update.messageSeq,
+      agentId,
+      sessionId,
+      sessionKey: params.sessionKey,
+    });
+  } else {
+    emitSessionTranscriptUpdate({
+      agentId,
+      sessionId,
     });
   }
 
   return { userMessagesPresent };
-}
-
-async function readTranscriptMirrorState(sessionFile: string): Promise<{
-  idempotencyKeys: Set<string>;
-  messageCount: number;
-  userMessagesByIdempotencyKey: Map<string, MirroredUserMessage>;
-}> {
-  const idempotencyKeys = new Set<string>();
-  const userMessagesByIdempotencyKey = new Map<string, MirroredUserMessage>();
-  let messageCount = 0;
-  let raw: string;
-  try {
-    raw = await fs.readFile(sessionFile, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-    return { idempotencyKeys, messageCount, userMessagesByIdempotencyKey };
-  }
-  for (const line of raw.split(/\r?\n/)) {
-    if (!line.trim()) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(line) as { message?: AgentMessage & { idempotencyKey?: unknown } };
-      if ((parsed as { type?: unknown }).type === "message") {
-        messageCount += 1;
-      }
-      if (typeof parsed.message?.idempotencyKey === "string") {
-        idempotencyKeys.add(parsed.message.idempotencyKey);
-        if (parsed.message.role === "user") {
-          userMessagesByIdempotencyKey.set(parsed.message.idempotencyKey, parsed.message);
-        }
-      }
-    } catch {
-      continue;
-    }
-  }
-  return { idempotencyKeys, messageCount, userMessagesByIdempotencyKey };
 }

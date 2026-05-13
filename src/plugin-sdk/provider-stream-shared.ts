@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto";
-import type { StreamFn } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, streamSimple } from "@earendil-works/pi-ai";
+import type { StreamFn } from "../agents/agent-core-contract.js";
+import { streamSimple } from "../agents/pi-ai-contract.js";
 import { streamWithPayloadPatch } from "../agents/pi-embedded-runner/stream-payload-utils.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import type { ProviderWrapStreamFnContext } from "./plugin-entry.js";

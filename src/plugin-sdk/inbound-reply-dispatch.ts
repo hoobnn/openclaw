@@ -169,7 +169,6 @@ export function buildInboundReplyDispatchBase(params: {
     agentId: string;
     sessionKey: string;
   };
-  storePath: string;
   ctxPayload: FinalizedMsgContext;
   core: {
     channel: {
@@ -188,7 +187,6 @@ export function buildInboundReplyDispatchBase(params: {
     accountId: params.accountId,
     agentId: params.route.agentId,
     routeSessionKey: params.route.sessionKey,
-    storePath: params.storePath,
     ctxPayload: params.ctxPayload,
     recordInboundSession: params.core.channel.session.recordInboundSession,
     dispatchReplyWithBufferedBlockDispatcher:
@@ -203,7 +201,6 @@ type RecordChannelMessageReplyDispatchParams = {
   accountId?: string;
   agentId: string;
   routeSessionKey: string;
-  storePath: string;
   ctxPayload: FinalizedMsgContext;
   recordInboundSession: RecordInboundSessionFn;
   dispatchReplyWithBufferedBlockDispatcher: DispatchReplyWithBufferedBlockDispatcher;
@@ -270,8 +267,38 @@ export async function recordChannelMessageReplyDispatch(
     channel: params.channel,
     accountId: params.accountId,
     agentId: params.agentId,
+    channel: params.channel,
+    accountId: params.accountId,
+  });
+  const deliver = async (payload: unknown, info: { kind: "tool" | "block" | "final" }) => {
+    const normalized =
+      payload && typeof payload === "object"
+        ? normalizeOutboundReplyPayload(payload as Record<string, unknown>)
+        : {};
+    if (params.durable) {
+      const durable = await deliverInboundReplyWithMessageSendContext({
+        cfg: params.cfg,
+        channel: params.channel,
+        accountId: params.accountId,
+        agentId: params.agentId,
+        ctxPayload: params.ctxPayload,
+        payload: normalized as ReplyPayload,
+        info,
+        ...params.durable,
+      });
+      throwIfDurableInboundReplyDeliveryFailed(durable);
+      if (isDurableInboundReplyDeliveryHandled(durable)) {
+        return durable.delivery;
+      }
+    }
+    return await params.deliver(normalized);
+  };
+
+  await runPreparedChannelTurn({
+    channel: params.channel,
+    accountId: params.accountId,
+    agentId: params.agentId,
     routeSessionKey: params.routeSessionKey,
-    storePath: params.storePath,
     ctxPayload: params.ctxPayload,
     recordInboundSession: params.recordInboundSession,
     dispatchReplyWithBufferedBlockDispatcher: params.dispatchReplyWithBufferedBlockDispatcher,

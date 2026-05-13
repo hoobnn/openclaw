@@ -1,13 +1,17 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  testing as replyRunTesting,
+  __testing as replyRunTesting,
   createReplyOperation,
   replyRunRegistry,
 } from "../auto-reply/reply/reply-run-registry.js";
+import { upsertSessionEntry } from "../config/sessions.js";
+import {
+  loadSqliteSessionTranscriptEvents,
+  replaceSqliteSessionTranscriptEvents,
+} from "../config/sessions/transcript-store.sqlite.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { createUserTurnTranscriptRecorder } from "../sessions/user-turn-transcript.js";
@@ -24,6 +28,7 @@ import { prepareCliRunContext } from "./cli-runner/prepare.js";
 import * as sessionHistoryModule from "./cli-runner/session-history.js";
 import { MAX_CLI_SESSION_HISTORY_MESSAGES } from "./cli-runner/session-history.js";
 import type { PreparedCliRunContext } from "./cli-runner/types.js";
+import { CURRENT_SESSION_VERSION } from "./transcript/session-transcript-contract.js";
 
 vi.mock("../plugins/hook-runner-global.js", () => ({
   getGlobalHookRunner: vi.fn(() => null),
@@ -35,6 +40,8 @@ vi.mock("../tts/tts.js", () => ({
 
 const mockGetGlobalHookRunner = vi.mocked(getGlobalHookRunner);
 const hookRunnerGlobalStateKey = Symbol.for("openclaw.plugins.hook-runner-global-state");
+const TEST_SESSION_ID = "s1";
+const TEST_SESSION_KEY = "agent:main:main";
 
 type HookRunnerGlobalStateForTest = {
   hookRunner: unknown;
@@ -55,38 +62,31 @@ function setHookRunnerForTest(hookRunner: unknown): void {
   globalStore[hookRunnerGlobalStateKey] = state;
 }
 
-function createSessionFile(params?: { history?: Array<{ role: "user"; content: string }> }) {
+function createTranscriptStateFixture(params?: {
+  history?: Array<{ role: "user"; content: string }>;
+}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-cli-hooks-"));
   vi.stubEnv("OPENCLAW_STATE_DIR", dir);
-  const sessionFile = path.join(dir, "agents", "main", "sessions", "s1.jsonl");
-  const storePath = path.join(path.dirname(sessionFile), "sessions.json");
-  fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-  fs.writeFileSync(
-    storePath,
-    JSON.stringify({
-      "agent:main:main": {
-        sessionId: "s1",
-        sessionFile,
-        updatedAt: Date.now(),
+  upsertSessionEntry({
+    agentId: "main",
+    sessionKey: TEST_SESSION_KEY,
+    entry: {
+      sessionId: TEST_SESSION_ID,
+      updatedAt: Date.now(),
+    },
+  });
+  replaceSqliteSessionTranscriptEvents({
+    agentId: "main",
+    sessionId: TEST_SESSION_ID,
+    events: [
+      {
+        type: "session",
+        version: CURRENT_SESSION_VERSION,
+        id: "s1",
+        timestamp: new Date(0).toISOString(),
+        cwd: dir,
       },
-    }),
-    "utf-8",
-  );
-  fs.writeFileSync(
-    sessionFile,
-    `${JSON.stringify({
-      type: "session",
-      version: CURRENT_SESSION_VERSION,
-      id: "session-test",
-      timestamp: new Date(0).toISOString(),
-      cwd: dir,
-    })}\n`,
-    "utf-8",
-  );
-  for (const [index, entry] of (params?.history ?? []).entries()) {
-    fs.appendFileSync(
-      sessionFile,
-      `${JSON.stringify({
+      ...(params?.history ?? []).map((entry, index) => ({
         type: "message",
         id: `msg-${index}`,
         parentId: index > 0 ? `msg-${index - 1}` : null,
@@ -96,11 +96,10 @@ function createSessionFile(params?: { history?: Array<{ role: "user"; content: s
           content: entry.content,
           timestamp: index + 1,
         },
-      })}\n`,
-      "utf-8",
-    );
-  }
-  return { dir, sessionFile, storePath };
+      })),
+    ],
+  });
+  return { dir };
 }
 
 function createCliUserTurnRecorder(params: {
@@ -138,9 +137,8 @@ function buildPreparedContext(params?: {
   };
   return {
     params: {
-      sessionId: "s1",
+      sessionId: TEST_SESSION_ID,
       sessionKey: params?.sessionKey,
-      sessionFile: "/tmp/session.jsonl",
       workspaceDir: "/tmp",
       prompt: "hi",
       provider: "codex-cli",
@@ -400,7 +398,7 @@ describe("runCliAgent reliability", () => {
         noOutputTimedOut: false,
       }),
     );
-    const { dir, sessionFile } = createSessionFile({
+    const { dir } = createTranscriptStateFixture({
       history: [{ role: "user", content: "earlier context" }],
     });
 
@@ -419,7 +417,6 @@ describe("runCliAgent reliability", () => {
               cliSessionId: "thread-123",
             }).params,
             agentId: "main",
-            sessionFile,
             workspaceDir: dir,
           },
         }),
@@ -630,7 +627,7 @@ describe("runCliAgent reliability", () => {
       runAgentEnd: vi.fn(async () => undefined),
     };
     setHookRunnerForTest(hookRunner);
-    const { dir, sessionFile } = createSessionFile();
+    const { dir } = createTranscriptStateFixture();
 
     supervisorSpawnMock.mockResolvedValueOnce(
       createManagedRun({
@@ -650,7 +647,6 @@ describe("runCliAgent reliability", () => {
         ...buildPreparedContext(),
         params: {
           ...buildPreparedContext().params,
-          sessionFile,
           workspaceDir: dir,
           sessionKey: "agent:main:main",
           agentId: "main",
@@ -1075,7 +1071,7 @@ describe("runCliAgent reliability", () => {
       runAgentEnd: vi.fn(() => agentEndSettled),
     };
     setHookRunnerForTest(hookRunner);
-    const { dir, sessionFile } = createSessionFile({
+    const { dir } = createTranscriptStateFixture({
       history: [{ role: "user", content: "earlier context" }],
     });
 
@@ -1090,7 +1086,6 @@ describe("runCliAgent reliability", () => {
         params: {
           ...context.params,
           agentId: "main",
-          sessionFile,
           workspaceDir: dir,
           prompt: "secret prompt",
           userTurnTranscriptRecorder: createCliUserTurnRecorder({
@@ -1167,18 +1162,35 @@ describe("runCliAgent reliability", () => {
       expect(callArg(hookRunner.runAgentEnd, 0, 1, "agent_end context")).toBeTypeOf("object");
       expect(JSON.stringify(hookRunner.runAgentEnd.mock.calls)).not.toContain("secret prompt");
 
-      const lines = fs.readFileSync(sessionFile, "utf-8").trim().split("\n");
-      const blockedLine = JSON.parse(lines[lines.length - 1]);
+      const events = loadSqliteSessionTranscriptEvents({
+        agentId: "main",
+        sessionId: "s1",
+      }).map(
+        (entry) =>
+          entry.event as {
+            message?: {
+              content?: Array<{ text?: string }>;
+              __openclaw?: Record<string, unknown>;
+            };
+          },
+      );
+      const blockedLine = events.at(-1);
+      expect(blockedLine).toBeDefined();
+      if (!blockedLine?.message?.content || !blockedLine.message.__openclaw) {
+        throw new Error("missing blocked transcript line");
+      }
       expect(blockedLine.message.content[0].text).toBe(
         "Your message could not be sent: The agent cannot read this message. (blocked by policy-plugin)",
       );
       expect(JSON.stringify(blockedLine)).not.toContain("secret prompt");
       expect(JSON.stringify(blockedLine)).not.toContain("matched secret prompt");
-      expect(blockedLine.message["__openclaw"].beforeAgentRunBlocked.blockedBy).toBe(
-        "policy-plugin",
+      const beforeAgentRunBlocked = requireRecord(
+        blockedLine.message.__openclaw.beforeAgentRunBlocked,
+        "beforeAgentRunBlocked",
       );
-      expect(blockedLine.message["__openclaw"].beforeAgentRunBlocked).not.toHaveProperty("reason");
-      expect(Object.hasOwn(blockedLine.message["__openclaw"], "beforeAgentRunBlocked")).toBe(true);
+      expect(beforeAgentRunBlocked.blockedBy).toBe("policy-plugin");
+      expect(beforeAgentRunBlocked).not.toHaveProperty("reason");
+      expect(Object.hasOwn(blockedLine.message.__openclaw, "beforeAgentRunBlocked")).toBe(true);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -1277,7 +1289,7 @@ describe("runCliAgent reliability", () => {
       runAgentEnd: vi.fn(async () => undefined),
     };
     setHookRunnerForTest(hookRunner);
-    const { dir, sessionFile } = createSessionFile({
+    const { dir } = createTranscriptStateFixture({
       history: Array.from({ length: MAX_CLI_SESSION_HISTORY_MESSAGES + 5 }, (_, index) => ({
         role: "user" as const,
         content: `history-${index}`,
@@ -1323,11 +1335,8 @@ describe("runCliAgent reliability", () => {
             sessionKey: "agent:main:main",
             runId: "run-retry-success",
             cliSessionId: "thread-123",
-            openClawHistoryPrompt:
-              "Continue this conversation using the OpenClaw transcript below.\n\nUser: recovered history\n\n<next_user_message>\nhi\n</next_user_message>",
           }).params,
           agentId: "main",
-          sessionFile,
           workspaceDir: dir,
         },
       });
@@ -1390,22 +1399,29 @@ describe("runCliAgent reliability", () => {
   });
 
   it("builds fresh-session history reseed prompts from hook-mutated prompts", async () => {
-    const { dir, sessionFile } = createSessionFile({
+    const { dir } = createTranscriptStateFixture({
       history: [{ role: "user", content: "earlier ask" }],
     });
-    fs.appendFileSync(
-      sessionFile,
-      `${JSON.stringify({
-        type: "compaction",
-        id: "compaction-1",
-        parentId: "msg-0",
-        timestamp: new Date(2).toISOString(),
-        summary: "compacted earlier ask",
-        firstKeptEntryId: "msg-0",
-        tokensBefore: 10_000,
-      })}\n`,
-      "utf-8",
-    );
+    const existingEvents = loadSqliteSessionTranscriptEvents({
+      agentId: "main",
+      sessionId: "s1",
+    }).map((entry) => entry.event);
+    replaceSqliteSessionTranscriptEvents({
+      agentId: "main",
+      sessionId: "s1",
+      events: [
+        ...existingEvents,
+        {
+          type: "compaction",
+          id: "compaction-1",
+          parentId: "msg-0",
+          timestamp: new Date(2).toISOString(),
+          summary: "compacted earlier ask",
+          firstKeptEntryId: "msg-0",
+          tokensBefore: 10_000,
+        },
+      ],
+    });
     const config: OpenClawConfig = {
       agents: {
         defaults: {
@@ -1432,7 +1448,6 @@ describe("runCliAgent reliability", () => {
     try {
       const context = await prepareCliRunContext({
         sessionId: "s1",
-        sessionFile,
         workspaceDir: dir,
         config,
         prompt: "current ask",

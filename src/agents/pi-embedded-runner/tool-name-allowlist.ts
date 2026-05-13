@@ -1,5 +1,4 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { sortUniqueStrings } from "../../shared/string-normalization.js";
+import type { AgentTool } from "../agent-core-contract.js";
 import type { ClientToolDefinition } from "./run/params.js";
 
 /**

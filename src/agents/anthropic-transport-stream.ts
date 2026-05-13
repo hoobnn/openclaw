@@ -1,4 +1,11 @@
-import type { StreamFn } from "@earendil-works/pi-agent-core";
+import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../shared/assistant-error-format.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import type { StreamFn } from "./agent-core-contract.js";
+import {
+  applyAnthropicPayloadPolicyToParams,
+  resolveAnthropicPayloadPolicy,
+} from "./anthropic-payload-policy.js";
+import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./copilot-dynamic-headers.js";
 import {
   calculateCost,
   getEnvApiKey,
@@ -8,15 +15,7 @@ import {
   type Model,
   type SimpleStreamOptions,
   type ThinkingLevel,
-} from "@earendil-works/pi-ai";
-import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../shared/assistant-error-format.js";
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
-import {
-  applyAnthropicPayloadPolicyToParams,
-  resolveAnthropicPayloadPolicy,
-} from "./anthropic-payload-policy.js";
-import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./copilot-dynamic-headers.js";
-import { parseJsonObjectPreservingUnsafeIntegers } from "./json-unsafe-integers.js";
+} from "./pi-ai-contract.js";
 import { resolveProviderEndpoint } from "./provider-attribution.js";
 import { buildGuardedModelFetch } from "./provider-transport-fetch.js";
 import { transformTransportMessages } from "./transport-message-transform.js";
@@ -503,10 +502,6 @@ function convertAnthropicTools(tools: Context["tools"], isOAuthToken: boolean) {
     });
   }
   return converted;
-}
-
-function parseAnthropicToolCallArguments(inputJson: string): unknown {
-  return parseJsonObjectPreservingUnsafeIntegers(inputJson) ?? parseStreamingJson(inputJson);
 }
 
 function mapStopReason(reason: string | undefined): string {
@@ -1279,9 +1274,8 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
               delta?.type === "input_json_delta" &&
               typeof delta.partial_json === "string"
             ) {
-              const partialJson = `${block.partialJson ?? ""}${delta.partial_json}`;
-              block.partialJson = partialJson;
-              block.arguments = parseAnthropicToolCallArguments(partialJson);
+              block.partialJson += delta.partial_json;
+              block.arguments = parseStreamingJson(block.partialJson);
               stream.push({
                 type: "toolcall_delta",
                 contentIndex: index,
@@ -1329,7 +1323,7 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
             }
             if (block.type === "toolCall") {
               if (typeof block.partialJson === "string" && block.partialJson.length > 0) {
-                block.arguments = parseAnthropicToolCallArguments(block.partialJson);
+                block.arguments = parseStreamingJson(block.partialJson);
               }
               delete block.partialJson;
               stream.push({
