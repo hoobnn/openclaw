@@ -29,6 +29,7 @@ export type RunCliAgentParams = {
   sessionKey?: string;
   sessionEntry?: SessionEntry;
   agentId?: string;
+  sessionFile?: string;
   trigger?: EmbeddedRunTrigger;
   workspaceDir: string;
   config?: OpenClawConfig;
