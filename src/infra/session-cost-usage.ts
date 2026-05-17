@@ -264,9 +264,11 @@ function resolveUsageSessionScope(params: {
   sessionId?: string;
   sessionEntry?: SessionEntry;
   agentId?: string;
+  databasePath?: string;
 }):
   | {
       agentId: string;
+      path?: string;
       sessionId: string;
     }
   | undefined {
@@ -275,6 +277,7 @@ function resolveUsageSessionScope(params: {
     const agentId = params.agentId ?? "main";
     return {
       agentId,
+      ...(params.databasePath ? { path: params.databasePath } : {}),
       sessionId: explicitSessionId,
     };
   }
@@ -362,6 +365,7 @@ export async function loadCostUsageSummary(params?: {
   days?: number;
   config?: OpenClawConfig;
   agentId?: string;
+  databasePath?: string;
 }): Promise<CostUsageSummary> {
   const now = new Date();
   let sinceTime: number;
@@ -383,7 +387,10 @@ export async function loadCostUsageSummary(params?: {
   const totals = emptyTotals();
   const resolveCost = createUsageCostResolver(params?.config);
 
-  for (const transcript of listSqliteSessionTranscripts({ agentId: params?.agentId })) {
+  for (const transcript of listSqliteSessionTranscripts({
+    agentId: params?.agentId,
+    ...(params?.databasePath ? { path: params.databasePath } : {}),
+  })) {
     if (transcript.updatedAt < sinceTime) {
       continue;
     }
@@ -434,6 +441,7 @@ export async function loadCostUsageSummary(params?: {
 export async function refreshCostUsageCache(params?: {
   config?: OpenClawConfig;
   agentId?: string;
+  databasePath?: string;
   maxFiles?: number;
   sessionTranscripts?: string[];
   startMs?: number;
@@ -447,6 +455,7 @@ export async function loadCostUsageSummaryFromCache(params: {
   endMs: number;
   config?: OpenClawConfig;
   agentId?: string;
+  databasePath?: string;
   requestRefresh?: boolean;
   refreshMode?: "background" | "sync-when-empty";
 }): Promise<CostUsageSummary> {
@@ -455,7 +464,10 @@ export async function loadCostUsageSummaryFromCache(params: {
     ...summary,
     cacheStatus: {
       status: "fresh",
-      cachedFiles: listSqliteSessionTranscripts({ agentId: params.agentId }).length,
+      cachedFiles: listSqliteSessionTranscripts({
+        agentId: params.agentId,
+        ...(params.databasePath ? { path: params.databasePath } : {}),
+      }).length,
       pendingFiles: 0,
       staleFiles: 0,
       refreshedAt: summary.updatedAt,
@@ -468,6 +480,7 @@ export async function loadSessionCostSummaryFromCache(params: {
   sessionEntry?: SessionEntry;
   config?: OpenClawConfig;
   agentId?: string;
+  databasePath?: string;
   startMs?: number;
   endMs?: number;
   requestRefresh?: boolean;
@@ -489,6 +502,7 @@ export async function loadSessionCostSummaryFromCache(params: {
 export function requestCostUsageCacheRefresh(_params?: {
   config?: OpenClawConfig;
   agentId?: string;
+  databasePath?: string;
   sessionTranscripts?: string[];
 }): void {
   // Usage is computed from SQLite transcript_events directly now.
@@ -496,11 +510,15 @@ export function requestCostUsageCacheRefresh(_params?: {
 
 export async function discoverAllSessions(params?: {
   agentId?: string;
+  databasePath?: string;
   startMs?: number;
   endMs?: number;
   includeFirstUserMessage?: boolean;
 }): Promise<DiscoveredSession[]> {
-  const sessions = listSqliteSessionTranscripts({ agentId: params?.agentId });
+  const sessions = listSqliteSessionTranscripts({
+    agentId: params?.agentId,
+    ...(params?.databasePath ? { path: params.databasePath } : {}),
+  });
   const discovered: DiscoveredSession[] = [];
 
   for (const transcript of sessions) {
@@ -542,6 +560,7 @@ export async function discoverAllSessions(params?: {
     }
     discovered.push({
       agentId: transcript.agentId,
+      ...(transcript.path ? { databasePath: transcript.path } : {}),
       sessionId: transcript.sessionId,
       mtime: transcript.updatedAt,
       firstUserMessage,
@@ -556,6 +575,7 @@ export async function loadSessionCostSummary(params: {
   sessionEntry?: SessionEntry;
   config?: OpenClawConfig;
   agentId?: string;
+  databasePath?: string;
   startMs?: number;
   endMs?: number;
 }): Promise<SessionCostSummary | null> {
@@ -872,6 +892,7 @@ export async function loadSessionUsageTimeSeries(params: {
   sessionEntry?: SessionEntry;
   config?: OpenClawConfig;
   agentId?: string;
+  databasePath?: string;
   maxPoints?: number;
 }): Promise<SessionUsageTimeSeries | null> {
   const scope = resolveUsageSessionScope(params);
@@ -983,6 +1004,7 @@ export async function loadSessionLogs(params: {
   sessionEntry?: SessionEntry;
   config?: OpenClawConfig;
   agentId?: string;
+  databasePath?: string;
   limit?: number;
 }): Promise<SessionLogEntry[] | null> {
   const scope = resolveUsageSessionScope(params);
