@@ -3118,11 +3118,14 @@ export async function runCodexAppServerAttempt(
       });
       const turnStartErrorMessage = usageLimitError?.message ?? formatErrorMessage(turnStartError);
       if (isInvalidCodexImagePayloadError(turnStartErrorMessage)) {
-        await clearCodexBindingAfterInvalidImagePayload(activeSessionFile, {
-          phase: "turn_start",
-          threadId: thread.threadId,
-          error: turnStartErrorMessage,
-        });
+        await clearCodexBindingAfterInvalidImagePayload(
+          { sessionKey: params.sessionKey, sessionId: activeSessionId },
+          {
+            phase: "turn_start",
+            threadId: thread.threadId,
+            error: turnStartErrorMessage,
+          },
+        );
       }
       emitCodexAppServerEvent(params, {
         stream: "codex_app_server.lifecycle",
@@ -3358,12 +3361,15 @@ export async function runCodexAppServerAttempt(
           ? formatErrorMessage(finalPromptError)
           : undefined;
     if (isInvalidCodexImagePayloadError(finalPromptErrorMessage)) {
-      await clearCodexBindingAfterInvalidImagePayload(activeSessionFile, {
-        phase: "turn_completed",
-        threadId: thread.threadId,
-        turnId: activeTurnId,
-        error: finalPromptErrorMessage,
-      });
+      await clearCodexBindingAfterInvalidImagePayload(
+        { sessionKey: params.sessionKey, sessionId: activeSessionId },
+        {
+          phase: "turn_completed",
+          threadId: thread.threadId,
+          turnId: activeTurnId,
+          error: finalPromptErrorMessage,
+        },
+      );
     }
     if (shouldRefreshCodexRateLimitsForUsageLimitMessage(finalPromptErrorMessage)) {
       finalPromptError = await refreshCodexUsageLimitErrorMessage({
@@ -5232,10 +5238,10 @@ function isInvalidCodexImagePayloadError(message: unknown): boolean {
 }
 
 async function clearCodexBindingAfterInvalidImagePayload(
-  sessionFile: string,
+  identity: { sessionKey?: string; sessionId: string },
   fields: { phase: string; threadId?: string; turnId?: string; error?: string },
 ): Promise<void> {
-  const currentBinding = await readCodexAppServerBinding(sessionFile);
+  const currentBinding = await readCodexAppServerBinding(identity);
   if (fields.threadId && currentBinding && currentBinding.threadId !== fields.threadId) {
     embeddedAgentLog.warn(
       "codex app-server image payload error detected for unbound thread; preserving thread binding",
@@ -5247,7 +5253,7 @@ async function clearCodexBindingAfterInvalidImagePayload(
     "codex app-server image payload error detected; clearing thread binding",
     fields,
   );
-  await clearCodexAppServerBinding(sessionFile);
+  await clearCodexAppServerBinding(identity);
 }
 
 function describeNotificationActivity(
