@@ -389,6 +389,7 @@ function buildWhatsAppQaConfig(
       defaults: {
         ...baseCfg.agents?.defaults,
         skipBootstrap: true,
+        thinkingDefault: "off",
       },
     },
     plugins: {
