@@ -264,6 +264,7 @@ import { buildEmbeddedSandboxInfo } from "../sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manager-cache.js";
 import { prepareSessionManagerForRun } from "../session-manager-init.js";
 import { resolveEmbeddedRunSkillEntries } from "../skills-runtime.js";
+import type { PromptMode } from "../../system-prompt.types.js";
 import {
   describeEmbeddedAgentStreamStrategy,
   resetEmbeddedAgentBaseStreamFnCacheForTest,
@@ -1323,6 +1324,28 @@ export function resolveAttemptConstructionToolsAllow(params: {
   return [...new Set(filtered)];
 }
 
+const MINIMAL_PROMPT_ONLY_TOOL_NAMES = new Set(["message", HEARTBEAT_RESPONSE_TOOL_NAME]);
+
+export function shouldUseMinimalPromptForAttemptTools(params: {
+  promptMode: PromptMode;
+  runtimeToolsAllow?: string[];
+  constructionToolsAllow?: string[];
+}): boolean {
+  if (params.runtimeToolsAllow !== undefined) {
+    return params.runtimeToolsAllow.length > 0;
+  }
+  if (params.promptMode === "none") {
+    return false;
+  }
+  const constructionAllow = params.constructionToolsAllow
+    ?.map((entry) => normalizeToolName(entry))
+    .filter(Boolean);
+  if (!constructionAllow?.length || constructionAllow.includes("*")) {
+    return false;
+  }
+  return constructionAllow.every((entry) => MINIMAL_PROMPT_ONLY_TOOL_NAMES.has(entry));
+}
+
 export async function runEmbeddedAttempt(
   params: EmbeddedRunAttemptParams,
 ): Promise<EmbeddedRunAttemptResult> {
@@ -2245,9 +2268,13 @@ export async function runEmbeddedAttempt(
       (isRawModelRun ? "none" : resolvePromptModeForSession(params.sessionKey));
     const promptSurface = resolveAgentPromptSurfaceForSessionKey(params.sessionKey);
 
-    // When toolsAllow is set, use minimal prompt and strip skills catalog
-    const effectivePromptMode = params.toolsAllow?.length ? ("minimal" as const) : promptMode;
-    const effectiveSkillsPrompt = params.toolsAllow?.length ? undefined : skillsPrompt;
+    const minimalPromptForTools = shouldUseMinimalPromptForAttemptTools({
+      promptMode,
+      runtimeToolsAllow: params.toolsAllow,
+      constructionToolsAllow,
+    });
+    const effectivePromptMode = minimalPromptForTools ? ("minimal" as const) : promptMode;
+    const effectiveSkillsPrompt = minimalPromptForTools ? undefined : skillsPrompt;
     const openClawReferences = await resolveOpenClawReferencePaths({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],
