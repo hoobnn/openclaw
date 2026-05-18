@@ -402,6 +402,7 @@ function buildWhatsAppQaConfig(
           modelRef,
           {
             ...modelCfg,
+            agentRuntime: { id: "pi" },
             params: {
               ...modelCfg.params,
               thinking: "off",
