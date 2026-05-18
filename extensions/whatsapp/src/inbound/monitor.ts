@@ -13,6 +13,7 @@ import { getChildLogger } from "openclaw/plugin-sdk/logging-core";
 import { defaultRuntime } from "openclaw/plugin-sdk/runtime-env";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveWhatsAppAccount } from "../accounts.js";
 import { maybeResolveWhatsAppApprovalReaction } from "../approval-reactions.js";
 import { readWebSelfIdentityForDecision, WhatsAppAuthUnstableError } from "../auth-store.js";
 import { getPrimaryIdentityId, resolveComparableIdentity } from "../identity.js";
@@ -179,6 +180,35 @@ type MonitorWebInboxOptions = {
   /** Shared group metadata cache used only for inbound metadata fallback after fetch failures. */
   groupMetadataCache?: WhatsAppGroupMetadataCache;
 };
+
+function hasConfiguredGroupEntries(value: unknown): boolean {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
+function hasConfiguredGroupAllowFrom(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function shouldHydrateParticipatingGroupsOnConnect(params: {
+  cfg: OpenClawConfig;
+  accountId: string;
+}): boolean {
+  const account = resolveWhatsAppAccount({
+    cfg: params.cfg,
+    accountId: params.accountId,
+  });
+  return (
+    account.groupPolicy === "open" ||
+    hasConfiguredGroupAllowFrom(account.groupAllowFrom) ||
+    hasConfiguredGroupEntries(account.groups)
+  );
+}
 
 export async function attachWebInboxToSocket(
   options: MonitorWebInboxOptions & {
@@ -1177,32 +1207,39 @@ export async function attachWebInboxToSocket(
     pendingMessageHandlers.delete(replayTask);
   });
 
-  void (async () => {
-    try {
-      const groups = await sock.groupFetchAllParticipating();
-      for (const [jid, meta] of Object.entries(groups ?? {})) {
-        if (meta) {
-          rememberGroupMetadataCacheEntry(
-            groupMetadataCache,
-            jid,
-            summarizeGroupMetaForReconnectCache(meta),
-          );
+  if (
+    shouldHydrateParticipatingGroupsOnConnect({
+      cfg: options.cfg,
+      accountId: options.accountId,
+    })
+  ) {
+    void (async () => {
+      try {
+        const groups = await sock.groupFetchAllParticipating();
+        for (const [jid, meta] of Object.entries(groups ?? {})) {
+          if (meta) {
+            rememberGroupMetadataCacheEntry(
+              groupMetadataCache,
+              jid,
+              summarizeGroupMetaForReconnectCache(meta),
+            );
+          }
         }
+        logWhatsAppVerbose(
+          options.verbose,
+          `Hydrated ${Object.keys(groups ?? {}).length} participating groups on connect`,
+        );
+      } catch (err) {
+        const error = String(err);
+        inboundLogger.warn({ error }, "failed hydrating participating groups on connect");
+        inboundConsoleLog.warn(`Failed hydrating participating groups on connect: ${error}`);
+        logWhatsAppVerbose(
+          options.verbose,
+          `Failed to hydrate participating groups on connect: ${error}`,
+        );
       }
-      logWhatsAppVerbose(
-        options.verbose,
-        `Hydrated ${Object.keys(groups ?? {}).length} participating groups on connect`,
-      );
-    } catch (err) {
-      const error = String(err);
-      inboundLogger.warn({ error }, "failed hydrating participating groups on connect");
-      inboundConsoleLog.warn(`Failed hydrating participating groups on connect: ${error}`);
-      logWhatsAppVerbose(
-        options.verbose,
-        `Failed to hydrate participating groups on connect: ${error}`,
-      );
-    }
-  })();
+    })();
+  }
 
   const sendApi = createWebSendApi({
     sock: {
