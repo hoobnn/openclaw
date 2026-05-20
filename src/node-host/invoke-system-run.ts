@@ -615,6 +615,7 @@ async function executeSystemRunPhase(
     shellCommand: phase.shellPayload,
     segments: phase.segments,
     segmentSatisfiedBy: phase.segmentSatisfiedBy,
+    authorizationPlan: phase.authorizationPlan,
     cwd: phase.cwd,
     env: phase.env,
   });
