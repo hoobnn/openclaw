@@ -581,6 +581,23 @@ describe("control UI routing", () => {
     expect(app.chatMobileControlsOpen).toBe(true);
     expect([...openDropdown.classList]).toEqual(["chat-controls-dropdown", "open"]);
 
+    const composer = expectElement(app, "textarea", HTMLTextAreaElement);
+    composer.focus();
+    const editableEscape = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    composer.dispatchEvent(editableEscape);
+    await app.updateComplete;
+
+    expect(editableEscape.defaultPrevented).toBe(false);
+    expect(app.chatMobileControlsOpen).toBe(true);
+    expect([...expectElement(app, ".chat-controls-dropdown", HTMLElement).classList]).toEqual([
+      "chat-controls-dropdown",
+      "open",
+    ]);
+
     document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, composed: true }));
     await app.updateComplete;
 

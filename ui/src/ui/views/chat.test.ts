@@ -814,7 +814,8 @@ describe("chat voice controls", () => {
     });
 
     const button = container.querySelector<HTMLButtonElement>(".chat-new-messages");
-    expect(button?.getAttribute("aria-label")).toBe("New messages, press N");
+    expect(button?.getAttribute("aria-label")).toBe("New messages");
+    expect(button?.getAttribute("aria-keyshortcuts")).toBe("N");
     expect(button?.getAttribute("title")).toBe("New messages (N)");
     expect(button?.querySelector("kbd")?.textContent).toBe("N");
 

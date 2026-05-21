@@ -32,7 +32,10 @@ import {
 } from "./app-defaults.ts";
 import type { EventLogEntry } from "./app-events.ts";
 import { connectGateway as connectGatewayInternal } from "./app-gateway.ts";
-import { resolveDashboardShortcutAction } from "./app-keyboard-shortcuts.ts";
+import {
+  isDashboardShortcutTextEntryEvent,
+  resolveDashboardShortcutAction,
+} from "./app-keyboard-shortcuts.ts";
 import {
   handleConnected,
   handleDisconnected,
@@ -647,7 +650,11 @@ export class OpenClawApp extends LitElement {
     }
   };
   private chatMobileControlsKeydownHandler = (e: KeyboardEvent) => {
-    if (e.key !== "Escape" || !this.chatMobileControlsOpen) {
+    if (
+      e.key !== "Escape" ||
+      !this.chatMobileControlsOpen ||
+      isDashboardShortcutTextEntryEvent(e)
+    ) {
       return;
     }
     e.preventDefault();
