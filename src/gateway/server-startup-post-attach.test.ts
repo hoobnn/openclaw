@@ -947,7 +947,7 @@ describe("startGatewayPostAttachRuntime", () => {
     const log = { info: vi.fn(), warn: vi.fn() };
 
     try {
-      const sidecar = testing.scheduleProviderAuthStatePrewarm({
+      const sidecar = __testing.scheduleProviderAuthStatePrewarm({
         getConfig: () => ({ marker: "current" }) as never,
         log,
         delayMs: 1_000,
@@ -979,7 +979,7 @@ describe("startGatewayPostAttachRuntime", () => {
     const log = { info: vi.fn(), warn: vi.fn() };
 
     try {
-      testing.scheduleProviderAuthStatePrewarm({
+      __testing.scheduleProviderAuthStatePrewarm({
         getConfig: () => currentCfg,
         log,
         delayMs: 0,
