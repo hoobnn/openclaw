@@ -474,6 +474,11 @@ export const uk: TranslationMap = {
       minutes: "{minutes}m {seconds}s",
     },
   },
+  workboard: {
+    disabledHelpStart: "Workboard вимкнено. Увімкніть",
+    enableConfigKey: "plugins.entries.workboard.enabled = true",
+    disabledHelpEnd: ", потім перезавантажте цю вкладку.",
+  },
   overview: {
     access: {
       title: "Доступ до шлюзу",
