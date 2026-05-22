@@ -1,6 +1,6 @@
 import { resolveFailoverReasonFromError } from "../../agents/failover-error.js";
 import { formatEmbeddedAgentExecutionPhase } from "../../agents/pi-embedded-runner/execution-phase.js";
-import { getSessionEntry, type SessionEntry } from "../../config/sessions.js";
+import { getSessionEntry } from "../../config/sessions.js";
 import type { CronConfig } from "../../config/types.cron.js";
 import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import {
@@ -451,9 +451,7 @@ function resolveMainSessionCronDeliveryContext(job: CronJob): DeliveryContext | 
     explicitAgentId || resolveAgentIdFromSessionKey(targetSessionKey),
   );
   try {
-    const sessionEntry = getSessionEntry({ agentId, sessionKey: targetSessionKey }) as
-      | SessionEntry
-      | undefined;
+    const sessionEntry = getSessionEntry({ agentId, sessionKey: targetSessionKey });
     return deliveryContextFromSession(sessionEntry);
   } catch {
     return undefined;
