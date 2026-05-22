@@ -1135,3 +1135,4 @@ export const __testing = {
   scheduleProviderAuthStatePrewarm,
   stopPostReadySidecarsAfterCloseStarted,
 };
+export { __testing as testing };
