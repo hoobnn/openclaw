@@ -309,8 +309,8 @@ describe("scripts/changed-lanes", () => {
       },
     );
 
-    expect(command.bin).toBe("corepack");
-    expect(command.args).toEqual(["pnpm", "check:no-conflict-markers"]);
+    expect(command.bin).toBe("pnpm");
+    expect(command.args).toEqual(["check:no-conflict-markers"]);
     expect(command.env?.COREPACK_ENABLE_DOWNLOAD_PROMPT).toBe("0");
     expect(command.env?.COREPACK_HOME).toContain("openclaw-corepack-home-");
     expect(command.env?.npm_execpath).toBeUndefined();
@@ -324,8 +324,8 @@ describe("scripts/changed-lanes", () => {
       { CI: "1", PATH: "/usr/bin" },
     );
 
-    expect(command.bin).toBe("corepack");
-    expect(command.args).toEqual(["pnpm", "check:no-conflict-markers"]);
+    expect(command.bin).toBe("pnpm");
+    expect(command.args).toEqual(["check:no-conflict-markers"]);
   });
 
   it("keeps local changed-check children on the repo pnpm shim", () => {

@@ -387,8 +387,7 @@ export function createPnpmManagedCommand(command, env = process.env) {
     const shimmedEnv = prependCorepackPnpmShim(commandEnv);
     return {
       ...command,
-      bin: "corepack",
-      args: ["pnpm", ...command.args],
+      bin: "pnpm",
       env: shimmedEnv,
     };
   }
