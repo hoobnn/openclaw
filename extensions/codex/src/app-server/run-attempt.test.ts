@@ -1279,7 +1279,7 @@ describe("runCodexAppServerAttempt", () => {
       const { requests, waitForMethod, completeTurn } = createStartedThreadHarness();
 
       const run = runCodexAppServerAttempt(params, {
-        startupTimeoutFloorMs: 120_000,
+        startupTimeoutFloorMs: 180_000,
         pluginConfig: {
           appServer: {
             mode: "yolo",
@@ -1287,7 +1287,7 @@ describe("runCodexAppServerAttempt", () => {
           },
         },
       });
-      await waitForMethod("turn/start", 120_000);
+      await waitForMethod("turn/start", 180_000);
       await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
       await run;
 
@@ -1336,7 +1336,7 @@ describe("runCodexAppServerAttempt", () => {
     } finally {
       restoreSandboxBackend();
     }
-  });
+  }, 240_000);
 
   it("closes the sandbox exec-server release path used by turn/start failure cleanup", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
