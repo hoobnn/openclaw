@@ -1201,6 +1201,7 @@ describe("runCodexAppServerAttempt", () => {
     if (!sandboxSessionKey) {
       throw new Error("createParams must provide a sessionKey for Codex dynamic tool tests.");
     }
+    const runAbortController = new AbortController();
     const dynamicTools = await testing.buildDynamicTools({
       params,
       resolvedWorkspace: workspaceDir,
@@ -1212,10 +1213,14 @@ describe("runCodexAppServerAttempt", () => {
         docker: { binds: ["/tmp/openclaw-data:/data:rw"] },
       } as never,
       nativeToolSurfaceEnabled: false,
-      runAbortController: new AbortController(),
+      runAbortController,
       sessionAgentId: "main",
       pluginConfig: { appServer: { mode: "yolo" } },
       onYieldDetected: () => undefined,
+    });
+    const toolBridge = createCodexDynamicToolBridge({
+      tools: dynamicTools,
+      signal: runAbortController.signal,
     });
     const appServer = resolveCodexAppServerRuntimeOptions({
       pluginConfig: { appServer: { mode: "yolo" } },
@@ -1224,7 +1229,7 @@ describe("runCodexAppServerAttempt", () => {
     });
     const startParams = buildThreadStartParams(params, {
       cwd: workspaceDir,
-      dynamicTools,
+      dynamicTools: toolBridge.specs,
       appServer,
       nativeCodeModeEnabled: false,
       nativeCodeModeOnlyEnabled: false,
