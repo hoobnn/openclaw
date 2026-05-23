@@ -425,6 +425,9 @@ export async function refreshActiveTab(host: SettingsHost) {
         break;
       case "activity":
         break;
+      case "workboard":
+        await loadConfig(app);
+        break;
       case "channels":
         await loadChannelsTab(host);
         break;
