@@ -254,11 +254,18 @@ describe("announce loop guard (#18264)", () => {
     );
 
     registry.initSubagentRegistry();
-    await Promise.resolve();
-    await Promise.resolve();
 
-    const runs = registry.listSubagentRunsForRequester("agent:main:main");
-    const stored = runs.find((run) => run.runId === runId);
+    let stored: SubagentRunRecord | undefined;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await Promise.resolve();
+      stored = registry
+        .listSubagentRunsForRequester("agent:main:main")
+        .find((run) => run.runId === runId);
+      if (stored?.announceRetryCount === 1) {
+        break;
+      }
+    }
+
     expect(stored?.cleanupHandled).toBe(false);
     expect(stored?.cleanupCompletedAt).toBeUndefined();
     expect(stored?.announceRetryCount).toBe(1);
