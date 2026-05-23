@@ -1160,7 +1160,6 @@ describe("runMemoryFlushIfNeeded", () => {
       sessionEntry,
       sessionStore: { main: sessionEntry },
       sessionKey: "main",
-      storePath: path.join(rootDir, "sessions.json"),
       isHeartbeat: false,
       replyOperation: createReplyOperation(),
     });
@@ -1299,7 +1298,6 @@ describe("runMemoryFlushIfNeeded", () => {
       sessionEntry,
       sessionStore: { main: sessionEntry },
       sessionKey: "main",
-      storePath: path.join(rootDir, "sessions.json"),
       isHeartbeat: false,
       replyOperation: createReplyOperation(),
     });
