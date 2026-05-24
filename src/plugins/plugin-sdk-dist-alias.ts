@@ -6,15 +6,15 @@ type OpenClawPackageJson = {
   exports?: Record<string, unknown>;
 };
 
-const PRIVATE_LOCAL_ONLY_PLUGIN_SDK_DIST_FILE_NAME_FALLBACK = [
-  "codex-mcp-projection.js",
-  "codex-native-task-runtime.js",
-  "qa-channel.js",
-  "qa-channel-protocol.js",
-  "qa-lab.js",
-  "qa-runtime.js",
-  "ssrf-runtime-internal.js",
-  "test-utils.js",
+const PRIVATE_LOCAL_ONLY_PLUGIN_SDK_DIST_SUBPATH_FALLBACK = [
+  "codex-mcp-projection",
+  "codex-native-task-runtime",
+  "qa-channel",
+  "qa-channel-protocol",
+  "qa-lab",
+  "qa-runtime",
+  "ssrf-runtime-internal",
+  "test-utils",
 ] as const;
 
 function isSafePluginSdkSubpathSegment(subpath: string): boolean {
@@ -42,7 +42,9 @@ function collectLegacyPublicPluginSdkDistFileNames(distRoot: string): Set<string
 
 function readPrivateLocalOnlyPluginSdkDistFileNames(distRoot: string): Set<string> {
   const packageRoot = path.dirname(path.resolve(distRoot));
-  const privateFileNames = new Set<string>(PRIVATE_LOCAL_ONLY_PLUGIN_SDK_DIST_FILE_NAME_FALLBACK);
+  const privateFileNames = new Set<string>(
+    PRIVATE_LOCAL_ONLY_PLUGIN_SDK_DIST_SUBPATH_FALLBACK.map((subpath) => `${subpath}.js`),
+  );
   const subpaths = tryReadJsonSync(
     path.join(packageRoot, "scripts", "lib", "plugin-sdk-private-local-only-subpaths.json"),
   );
