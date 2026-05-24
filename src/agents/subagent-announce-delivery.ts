@@ -35,7 +35,10 @@ import {
   hasVisibleAgentPayload,
 } from "./pi-embedded-runner/delivery-evidence.js";
 import type { EmbeddedPiQueueMessageOptions } from "./pi-embedded-runner/run-state.js";
-import type { EmbeddedPiQueueMessageOutcome } from "./pi-embedded-runner/runs.js";
+import type {
+  EmbeddedPiQueueFailureReason,
+  EmbeddedPiQueueMessageOutcome,
+} from "./pi-embedded-runner/runs.js";
 import {
   callGateway,
   createBoundDeliveryRouter,
@@ -707,18 +710,8 @@ async function sendSubagentAnnounceDirectly(params: {
         requesterSessionOrigin,
       });
     const requiresMessageToolDelivery =
-      agentMediatedCompletion &&
-      (completionChatType === "channel" ||
-        completionChatType === "group" ||
-        expectedMediaUrls.length > 0 ||
-        completionRequiresMessageToolDelivery({
-          cfg,
-          requesterSessionKey: params.requesterSessionKey,
-          targetRequesterSessionKey: canonicalRequesterSessionKey,
-          requesterEntry,
-          directOrigin: effectiveDirectOrigin,
-          requesterSessionOrigin,
-        }));
+      completionRouteRequiresMessageToolDelivery ||
+      (agentMediatedCompletion && expectedMediaUrls.length > 0);
     const completionSourceReplyDeliveryMode = requiresMessageToolDelivery
       ? "message_tool_only"
       : undefined;
@@ -899,7 +892,7 @@ async function sendSubagentAnnounceDirectly(params: {
 
     if (
       requiresMessageToolDelivery &&
-      !hasGatewayAgentMessagingToolDelivery(directAnnounceResponse)
+      !hasGatewayAgentMessagingToolDeliveryEvidence(directAnnounceResponse)
     ) {
       return {
         delivered: false,

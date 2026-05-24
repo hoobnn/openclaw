@@ -3698,6 +3698,7 @@ export async function runEmbeddedAttempt(
       const activeSessionManager = sessionManager;
       let preflightRecovery: EmbeddedRunAttemptResult["preflightRecovery"];
       let promptErrorSource: EmbeddedRunAttemptResult["promptErrorSource"] = null;
+      let contextBudgetStatus: EmbeddedRunAttemptResult["contextBudgetStatus"];
       const handleMidTurnPrecheckRequest = async (request: MidTurnPrecheckRequest) => {
         const logMidTurnPrecheck = (route: string, extra?: string) => {
           log.warn(
