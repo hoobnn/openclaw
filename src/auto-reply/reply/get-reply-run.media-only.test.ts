@@ -156,6 +156,7 @@ async function loadFreshGetReplyRunModuleForTest() {
 function baseParams(
   overrides: Partial<Parameters<typeof runPreparedReply>[0]> = {},
 ): Parameters<typeof runPreparedReply>[0] {
+  const { defaultProvider = "anthropic", ...restOverrides } = overrides;
   return {
     ctx: {
       Body: "",
@@ -217,6 +218,7 @@ function baseParams(
       onReplyStart: vi.fn().mockResolvedValue(undefined),
       cleanup: vi.fn(),
     } as never,
+    defaultProvider,
     defaultModel: "claude-opus-4-1",
     timeoutMs: 30_000,
     isNewSession: true,
@@ -225,7 +227,7 @@ function baseParams(
     sessionKey: "session-key",
     workspaceDir: "/tmp/workspace",
     abortedLastRun: false,
-    ...overrides,
+    ...restOverrides,
   };
 }
 
