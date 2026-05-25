@@ -1,11 +1,15 @@
 {
-  "fallbackKeys": [],
-  "generatedAt": "2026-05-17T15:18:21.327Z",
+  "fallbackKeys": [
+    "chat.newMessages.label",
+    "chat.newMessages.shortcut",
+    "chat.newMessages.title"
+  ],
+  "generatedAt": "2026-05-25T05:33:27.889Z",
   "locale": "es",
   "model": "claude-opus-4-7",
   "provider": "anthropic",
-  "sourceHash": "79544002c00e9adfebe5cc0ad3a6ff6393313f6fd7b546e68f0d53110df29914",
-  "totalKeys": 1117,
+  "sourceHash": "6622d3f7f45fb847836c2dd08a7af4e824247fb4bd58ad8c156cdae1668c2b72",
+  "totalKeys": 1120,
   "translatedKeys": 1117,
   "workflow": 1
 }

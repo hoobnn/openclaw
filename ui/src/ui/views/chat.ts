@@ -998,6 +998,8 @@ export function renderChat(props: ChatProps) {
     props.compactionStatus?.phase === "active" || props.compactionStatus?.phase === "retrying";
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
   const reasoningLevel = activeSession?.reasoningLevel ?? "off";
+  const newMessagesLabel = t("chat.newMessages.label");
+  const newMessagesShortcut = t("chat.newMessages.shortcut");
   const showReasoning = props.showThinking && reasoningLevel !== "off";
   const assistantIdentity = {
     name: props.assistantName,
@@ -1434,11 +1436,11 @@ export function renderChat(props: ChatProps) {
               class="chat-new-messages"
               type="button"
               @click=${props.onScrollToBottom}
-              aria-label="New messages"
-              aria-keyshortcuts="N"
-              title="New messages (N)"
+              aria-label=${newMessagesLabel}
+              aria-keyshortcuts=${newMessagesShortcut}
+              title=${t("chat.newMessages.title", { shortcut: newMessagesShortcut })}
             >
-              ${icons.arrowDown} <span>New messages</span><kbd>N</kbd>
+              ${icons.arrowDown} <span>${newMessagesLabel}</span><kbd>${newMessagesShortcut}</kbd>
             </button>
           `
         : nothing}

@@ -1,8 +1,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-const indexHtmlPath = path.resolve(process.cwd(), "ui/index.html");
+const indexHtmlPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../index.html",
+);
 type TestWindow = Window & typeof globalThis;
 
 async function readIndexHtmlWithDelay(delayMs: number): Promise<string> {

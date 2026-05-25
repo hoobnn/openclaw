@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig, defineProject } from "vitest/config";
 import {
@@ -5,9 +7,18 @@ import {
   resolveDefaultVitestPool,
 } from "../test/vitest/vitest.shared.config.ts";
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sharedUiTestConfig = {
   isolate: false,
   pool: resolveDefaultVitestPool(),
+} as const;
+const sharedUiResolveConfig = {
+  alias: [
+    {
+      find: "openclaw/plugin-sdk/test-fixtures",
+      replacement: path.join(repoRoot, "src", "plugin-sdk", "test-fixtures.ts"),
+    },
+  ],
 } as const;
 const nodeDrivenBrowserLayoutTests = [
   "src/ui/chat/chat-responsive.browser.test.ts",
@@ -19,6 +30,7 @@ export default defineConfig({
     ...sharedUiTestConfig,
     projects: [
       defineProject({
+        resolve: sharedUiResolveConfig,
         test: {
           ...sharedUiTestConfig,
           deps: jsdomOptimizedDeps,
@@ -30,6 +42,7 @@ export default defineConfig({
         },
       }),
       defineProject({
+        resolve: sharedUiResolveConfig,
         test: {
           ...sharedUiTestConfig,
           deps: jsdomOptimizedDeps,
@@ -40,6 +53,7 @@ export default defineConfig({
         },
       }),
       defineProject({
+        resolve: sharedUiResolveConfig,
         test: {
           ...sharedUiTestConfig,
           name: "browser",
