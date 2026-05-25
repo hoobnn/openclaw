@@ -376,6 +376,7 @@ Docs: https://docs.openclaw.ai
 - QA-Lab: release logged-out WhatsApp Convex credentials before retrying so a bad lease does not exhaust the live credential pool.
 - QA-Lab: skip WhatsApp Convex credentials rejected earlier in the same run when the broker returns them again, making stale pools fail with clear artifacts instead of relaunching the same logged-out session.
 - QA-Lab: include redacted WhatsApp driver/SUT auth fingerprints in live artifacts and label driver-auth logout failures so refreshed Convex credentials can be verified without exposing secrets.
+- WhatsApp: send composing presence best-effort before outbound replies so slow or failed typing indicators no longer delay message delivery.
 - WhatsApp: register the channel runtime through a narrow setter entrypoint so gateway startup no longer imports the broad WhatsApp runtime barrel before live message handling.
 - Gateway: defer provider auth-state prewarm until after startup readiness so early gateway tool/session requests are not blocked by provider auth discovery. (#85272) Thanks @dutifulbob.
 - Gateway/models: coalesce provider auth-state rewarms after auth-profile failures and log event-loop delay for warm/rewarm work, so provider auth bursts no longer stack full auth sweeps behind channel replies.
