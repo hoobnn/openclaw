@@ -568,8 +568,10 @@ function renderStartExecutionButton(
   const state = getWorkboardState(props.host);
   const busy = state.busyCardId === card.id;
   const title = engine
-    ? `${mode === "autonomous" ? "Run" : "Open"} ${engine}`
-    : "Run default agent";
+    ? t(mode === "autonomous" ? "workboard.startAutonomousEngine" : "workboard.startManualEngine", {
+        engine,
+      })
+    : t("workboard.startDefaultAgent");
   return html`
     <button
       class="btn btn--xs workboard-card__start workboard-card__start--${mode} ${engine
@@ -591,7 +593,7 @@ function renderStartExecutionButton(
         }
       }}
     >
-      ${mode === "autonomous" ? icons.play : icons.penLine} ${engine ?? "Start"}
+      ${mode === "autonomous" ? icons.play : icons.penLine} ${engine ?? t("workboard.start")}
     </button>
   `;
 }
@@ -623,7 +625,7 @@ function renderCard(props: WorkboardProps, card: WorkboardCard) {
         : ""}"
       role=${linked ? "button" : nothing}
       tabindex=${linked ? 0 : nothing}
-      title=${linked ? "Open linked session" : nothing}
+      title=${linked ? t("workboard.openLinkedSession") : nothing}
       draggable="true"
       @click=${(event: MouseEvent) => {
         if (!isCardActionTarget(event)) {
@@ -651,7 +653,7 @@ function renderCard(props: WorkboardProps, card: WorkboardCard) {
     >
       <div class="workboard-card__top">
         <span class="workboard-card__priority">${card.priority}</span>
-        ${live ? html`<span class="workboard-live">live</span>` : nothing}
+        ${live ? html`<span class="workboard-live">${t("workboard.live")}</span>` : nothing}
         ${syncing ? html`<span class="workboard-live">${t("common.saving")}</span>` : nothing}
       </div>
       <h3>${card.title}</h3>
@@ -662,7 +664,9 @@ function renderCard(props: WorkboardProps, card: WorkboardCard) {
           </div>`
         : nothing}
       <div class="workboard-card__meta">
-        ${card.agentId ? html`<span>${card.agentId}</span>` : html`<span>default agent</span>`}
+        ${card.agentId
+          ? html`<span>${card.agentId}</span>`
+          : html`<span>${t("workboard.defaultAgent")}</span>`}
         <span>${formatTime(card.updatedAt)}</span>
       </div>
       <div class="workboard-card__actions">
@@ -680,7 +684,7 @@ function renderCard(props: WorkboardProps, card: WorkboardCard) {
           ? html`
               <button
                 class="btn btn--icon workboard-card__icon"
-                title="Open session"
+                title=${t("workboard.openSession")}
                 @click=${() => props.onOpenSession(linkedSessionKey!)}
               >
                 ${icons.messageSquare}
@@ -707,7 +711,7 @@ function renderCard(props: WorkboardProps, card: WorkboardCard) {
           : renderStartExecutionControls(props, card)}
         <button
           class="btn btn--icon workboard-card__icon workboard-card__delete"
-          title="Delete card"
+          title=${t("workboard.deleteCard")}
           ?disabled=${busy}
           @click=${() =>
             deleteWorkboardCard({
@@ -757,7 +761,7 @@ function renderColumn(props: WorkboardProps, status: WorkboardStatus, cards: Wor
       <div class="workboard-column__cards">
         ${cards.length
           ? cards.map((card) => renderCard(props, card))
-          : html`<div class="workboard-empty">Drop work here</div>`}
+          : html`<div class="workboard-empty">${t("workboard.dropWorkHere")}</div>`}
       </div>
     </section>
   `;
@@ -825,7 +829,7 @@ export function renderWorkboard(props: WorkboardProps) {
               props.onRequestUpdate?.();
             }}
           >
-            <option value="all">All priorities</option>
+            <option value="all">${t("workboard.allPriorities")}</option>
             ${WORKBOARD_PRIORITIES.map(
               (priority) => html`<option value=${priority}>${priority}</option>`,
             )}
@@ -861,7 +865,7 @@ export function renderWorkboard(props: WorkboardProps) {
               props.onRequestUpdate?.();
             }}
           >
-            ${icons.plus} New card
+            ${icons.plus} ${t("workboard.newCard")}
           </button>
         </div>
       </div>
