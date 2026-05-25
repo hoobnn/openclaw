@@ -101,6 +101,12 @@ describe("WhatsApp QA live runtime", () => {
     expect(testing.toCredentialFingerprint(undefined)).toBeUndefined();
   });
 
+  it("hashes credential auth material for redacted QA artifact correlation", () => {
+    expect(testing.toCredentialMaterialFingerprint("driver-archive")).toBe("5c9734c563eb");
+    expect(testing.toCredentialMaterialFingerprint("")).toBeUndefined();
+    expect(testing.toCredentialMaterialFingerprint(undefined)).toBeUndefined();
+  });
+
   it("unpacks auth archives into a caller-provided temp directory", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-wa-qa-test-"));
     try {
@@ -219,6 +225,10 @@ describe("WhatsApp QA live runtime", () => {
     const report = testing.renderWhatsAppQaMarkdown({
       cleanupIssues: [],
       credentialFingerprint: "7e9678a23fc4",
+      credentialMaterialFingerprints: {
+        driverAuthArchive: "driver123456",
+        sutAuthArchive: "sut123456789",
+      },
       credentialSource: "convex",
       finishedAt: "2026-05-18T10:00:05.000Z",
       redactMetadata: true,
@@ -244,6 +254,8 @@ describe("WhatsApp QA live runtime", () => {
       "- Timing: gatewayStart=1200ms, channelReady=21000ms, sendText=450ms, waitForReply=2760ms",
     );
     expect(report).toContain("- Credential fingerprint: `7e9678a23fc4`");
+    expect(report).toContain("- Driver auth fingerprint: `driver123456`");
+    expect(report).toContain("- SUT auth fingerprint: `sut123456789`");
   });
 
   it("arms WhatsApp gateway diagnostics only when requested", () => {

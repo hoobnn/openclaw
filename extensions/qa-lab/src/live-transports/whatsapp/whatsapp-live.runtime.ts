@@ -178,6 +178,10 @@ type WhatsAppQaSummary = {
     role?: QaCredentialRole;
     source: "convex" | "env";
   };
+  credentialMaterialFingerprints?: {
+    driverAuthArchive?: string;
+    sutAuthArchive?: string;
+  };
   finishedAt: string;
   metrics?: {
     gatewayHeapSnapshots?: WhatsAppQaGatewayHeapSnapshot[];
@@ -1098,6 +1102,13 @@ function toCredentialFingerprint(credentialId: string | undefined) {
     : undefined;
 }
 
+function toCredentialMaterialFingerprint(value: string | undefined) {
+  const normalized = value?.trim();
+  return normalized
+    ? createHash("sha256").update(normalized).digest("hex").slice(0, 12)
+    : undefined;
+}
+
 function formatWhatsAppScenarioTimings(timings: WhatsAppQaScenarioTimings | undefined) {
   if (!timings) {
     return undefined;
@@ -1118,6 +1129,10 @@ function formatWhatsAppScenarioTimings(timings: WhatsAppQaScenarioTimings | unde
 function renderWhatsAppQaMarkdown(params: {
   cleanupIssues: string[];
   credentialFingerprint?: string;
+  credentialMaterialFingerprints?: {
+    driverAuthArchive?: string;
+    sutAuthArchive?: string;
+  };
   credentialSource: "convex" | "env";
   finishedAt: string;
   gatewayDebugDirPath?: string;
@@ -1132,6 +1147,14 @@ function renderWhatsAppQaMarkdown(params: {
     `- Credential source: \`${params.credentialSource}\``,
     ...(params.credentialFingerprint
       ? [`- Credential fingerprint: \`${params.credentialFingerprint}\``]
+      : []),
+    ...(params.credentialMaterialFingerprints?.driverAuthArchive
+      ? [
+          `- Driver auth fingerprint: \`${params.credentialMaterialFingerprints.driverAuthArchive}\``,
+        ]
+      : []),
+    ...(params.credentialMaterialFingerprints?.sutAuthArchive
+      ? [`- SUT auth fingerprint: \`${params.credentialMaterialFingerprints.sutAuthArchive}\``]
       : []),
     `- SUT phone: \`${params.redactMetadata ? "<redacted>" : (params.sutPhoneE164 ?? "<unavailable>")}\``,
     `- Metadata redaction: \`${params.redactMetadata ? "enabled" : "disabled"}\``,
@@ -1255,6 +1278,7 @@ export async function runWhatsAppQaLive(params: {
   const tempAuthRoots: string[] = [];
   let credentialLease: WhatsAppCredentialLease | undefined;
   let runtimeEnv: WhatsAppQaRuntimeEnv | undefined;
+  let credentialMaterialFingerprints: WhatsAppQaSummary["credentialMaterialFingerprints"];
   let driver: WhatsAppQaDriverSession | undefined;
   const sampleGatewayProcessRss = (gateway: WhatsAppQaGatewayHandle, label: string) => {
     const gatewayProcessRssBytes = gateway.getProcessRssBytes?.() ?? null;
@@ -1331,6 +1355,10 @@ export async function runWhatsAppQaLive(params: {
         continue;
       }
       runtimeEnv = credentialLease.payload;
+      credentialMaterialFingerprints = {
+        driverAuthArchive: toCredentialMaterialFingerprint(runtimeEnv.driverAuthArchiveBase64),
+        sutAuthArchive: toCredentialMaterialFingerprint(runtimeEnv.sutAuthArchiveBase64),
+      };
       const tempAuthRoot = await fs.mkdtemp(
         path.join(resolvePreferredOpenClawTmpDir(), "openclaw-whatsapp-qa-"),
       );
@@ -1366,7 +1394,7 @@ export async function runWhatsAppQaLive(params: {
           rejectedCredentialIds.add(credentialLease.credentialId);
         }
         cleanupIssues.push(
-          `WhatsApp credential ${toCredentialFingerprint(credentialLease.credentialId) ?? "<unknown>"} was logged out; trying another Convex lease.`,
+          `WhatsApp driver auth for credential ${toCredentialFingerprint(credentialLease.credentialId) ?? "<unknown>"} was logged out; trying another Convex lease.`,
         );
         await discardRejectedWhatsAppCredentialLease({
           cleanupIssues,
@@ -1576,6 +1604,7 @@ export async function runWhatsAppQaLive(params: {
     startedAt,
     finishedAt,
     cleanupIssues,
+    ...(credentialMaterialFingerprints ? { credentialMaterialFingerprints } : {}),
     ...(hasGatewayMetrics
       ? {
           metrics: {
@@ -1612,6 +1641,7 @@ export async function runWhatsAppQaLive(params: {
     `${renderWhatsAppQaMarkdown({
       cleanupIssues,
       credentialFingerprint,
+      credentialMaterialFingerprints,
       credentialSource: credentialLease?.source ?? requestedCredentialSource,
       finishedAt,
       gatewayDebugDirPath: preservedGatewayDebugArtifacts ? gatewayDebugDirPath : undefined,
@@ -1651,6 +1681,7 @@ export const testing = {
   resolveWhatsAppMetadataRedaction,
   shouldPreserveWhatsAppGatewayDebugArtifacts,
   toCredentialFingerprint,
+  toCredentialMaterialFingerprint,
   toObservedWhatsAppArtifacts,
   unpackWhatsAppAuthArchive,
   WHATSAPP_QA_STANDARD_SCENARIO_IDS,
