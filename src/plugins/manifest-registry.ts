@@ -936,7 +936,7 @@ export function loadPluginManifestRegistry(
     config?: OpenClawConfig;
     workspaceDir?: string;
     env?: NodeJS.ProcessEnv;
-    candidates?: PluginCandidate[];
+    candidates?: readonly PluginCandidate[];
     diagnostics?: PluginDiagnostic[];
     installRecords?: Record<string, PluginInstallRecord>;
     bundledChannelConfigCollector?: BundledChannelConfigCollector;
@@ -969,7 +969,7 @@ export function loadPluginManifestRegistry(
         installRecords: getInstallRecords(),
       }));
   const diagnostics: PluginDiagnostic[] = [...discovery.diagnostics];
-  const candidates: PluginCandidate[] = discovery.candidates;
+  const candidates: readonly PluginCandidate[] = discovery.candidates;
   const records: PluginManifestRecord[] = [];
   const seenIds = new Map<string, SeenIdEntry>();
   const realpathCache = new Map<string, string>();
