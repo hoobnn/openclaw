@@ -44,7 +44,7 @@ import {
 } from "./controllers/agents.ts";
 import { setAssistantAvatarOverride } from "./controllers/assistant-identity.ts";
 import { loadChannels } from "./controllers/channels.ts";
-import { loadChatHistory } from "./controllers/chat.ts";
+import { loadChatHistory, loadOlderChatHistory } from "./controllers/chat.ts";
 import {
   applyConfig,
   ensureAgentConfigEntry,
@@ -2787,6 +2787,12 @@ export function renderApp(state: AppViewState) {
                     state.resetToolStream();
                     return refreshChat(state, { awaitHistory: true, scheduleScroll: false });
                   },
+                  historyHasMore: state.chatHistoryHasMore,
+                  historyLoadingMore: state.chatHistoryLoadingMore,
+                  onLoadOlderHistory: async () => {
+                    await loadOlderChatHistory(state);
+                    requestHostUpdate();
+                  },
                   onToggleFocusMode: () => {
                     if (state.onboarding) {
                       return;
@@ -2833,6 +2839,9 @@ export function renderApp(state: AppViewState) {
                     try {
                       await state.client.request("sessions.reset", { key: state.sessionKey });
                       state.chatMessages = [];
+                      state.chatHistoryBeforeSeq = null;
+                      state.chatHistoryHasMore = false;
+                      state.chatHistoryLoadingMore = false;
                       state.chatSideResult = null;
                       reconcileChatRunLifecycle(
                         state as unknown as Parameters<typeof reconcileChatRunLifecycle>[0],

@@ -116,6 +116,7 @@ async function writeMainSessionTranscript(sessionDir: string, lines: string[]) {
 async function fetchHistoryMessages(
   ws: GatewaySocket,
   params?: {
+    beforeSeq?: number;
     limit?: number;
     maxChars?: number;
   },
@@ -123,10 +124,41 @@ async function fetchHistoryMessages(
   const historyRes = await rpcReq<{ messages?: unknown[] }>(ws, "chat.history", {
     sessionKey: "main",
     limit: params?.limit ?? 1000,
+    ...(typeof params?.beforeSeq === "number" ? { beforeSeq: params.beforeSeq } : {}),
     ...(typeof params?.maxChars === "number" ? { maxChars: params.maxChars } : {}),
   });
   expect(historyRes.ok).toBe(true);
   return historyRes.payload?.messages ?? [];
+}
+
+async function fetchHistoryPayload(
+  ws: GatewaySocket,
+  params?: {
+    beforeSeq?: number;
+    limit?: number;
+    maxChars?: number;
+  },
+): Promise<{
+  hasMore?: boolean;
+  messages?: unknown[];
+  newestSeq?: number;
+  nextBeforeSeq?: number | null;
+  oldestSeq?: number;
+}> {
+  const historyRes = await rpcReq<{
+    hasMore?: boolean;
+    messages?: unknown[];
+    newestSeq?: number;
+    nextBeforeSeq?: number | null;
+    oldestSeq?: number;
+  }>(ws, "chat.history", {
+    sessionKey: "main",
+    limit: params?.limit ?? 1000,
+    ...(typeof params?.beforeSeq === "number" ? { beforeSeq: params.beforeSeq } : {}),
+    ...(typeof params?.maxChars === "number" ? { maxChars: params.maxChars } : {}),
+  });
+  expect(historyRes.ok).toBe(true);
+  return historyRes.payload ?? {};
 }
 
 type ConfiguredImageModelCase = {
@@ -224,6 +256,76 @@ describe("gateway server chat", () => {
       testState.sessionStorePath = undefined;
       await fs.rm(sessionDir, { recursive: true, force: true });
     }
+  });
+
+  test("chat.history paginates displayable messages around hidden transcript entries", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      const sessionDir = await prepareMainHistoryHarness({ ws, createSessionDir });
+      await writeMainSessionTranscript(sessionDir, [
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "older question" }],
+            timestamp: 1,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "older answer" }],
+            timestamp: 2,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "NO_REPLY" }],
+            timestamp: 3,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "NO_REPLY" }],
+            timestamp: 4,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "recent question" }],
+            timestamp: 5,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "recent answer" }],
+            timestamp: 6,
+          },
+        }),
+      ]);
+
+      const recent = await fetchHistoryPayload(ws, { limit: 2 });
+      expect(recent.messages?.map((message) => JSON.stringify(message))).toEqual([
+        expect.stringContaining("recent question"),
+        expect.stringContaining("recent answer"),
+      ]);
+      expect(recent.hasMore).toBe(true);
+      expect(recent.oldestSeq).toBe(5);
+      expect(recent.newestSeq).toBe(6);
+      expect(recent.nextBeforeSeq).toBe(5);
+
+      const older = await fetchHistoryPayload(ws, { beforeSeq: 5, limit: 2 });
+      expect(older.messages?.map((message) => JSON.stringify(message))).toEqual([
+        expect.stringContaining("older question"),
+        expect.stringContaining("older answer"),
+      ]);
+      expect(older.hasMore).toBe(false);
+      expect(older.oldestSeq).toBe(1);
+      expect(older.newestSeq).toBe(2);
+      expect(older.nextBeforeSeq).toBeNull();
+    });
   });
 
   test("chat.send returns in_flight when duplicate attachment send wins parsing race", async () => {
