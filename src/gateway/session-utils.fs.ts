@@ -590,6 +590,35 @@ export async function visitSessionMessagesAsync(
   return index.entries.length;
 }
 
+export async function visitSessionMessagesReverseAsync(
+  sessionId: string,
+  storePath: string | undefined,
+  sessionFile: string | undefined,
+  visit: (message: unknown, seq: number) => boolean | void,
+  _opts: { mode: "full"; reason: string },
+): Promise<number> {
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  if (!filePath) {
+    return 0;
+  }
+  const index = await readSessionTranscriptIndex(filePath);
+  if (!index) {
+    return 0;
+  }
+  for (let entryIndex = index.entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
+    const entry = index.entries[entryIndex];
+    const message = indexedTranscriptEntryToMessage(entry);
+    if (!message) {
+      continue;
+    }
+    const shouldContinue = visit(message, entry.seq);
+    if (shouldContinue === false) {
+      break;
+    }
+  }
+  return index.entries.length;
+}
+
 export async function readSessionMessageCountAsync(
   sessionId: string,
   storePath: string | undefined,

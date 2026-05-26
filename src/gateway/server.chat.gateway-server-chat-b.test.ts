@@ -161,6 +161,20 @@ async function fetchHistoryPayload(
   return historyRes.payload ?? {};
 }
 
+function historySeqs(messages: unknown[] | undefined): number[] {
+  return (messages ?? []).flatMap((message) => {
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      return [];
+    }
+    const marker = (message as { __openclaw?: unknown }).__openclaw;
+    if (!marker || typeof marker !== "object" || Array.isArray(marker)) {
+      return [];
+    }
+    const seq = (marker as { seq?: unknown }).seq;
+    return typeof seq === "number" ? [seq] : [];
+  });
+}
+
 type ConfiguredImageModelCase = {
   id: string;
   imageModel: AgentModelConfig;
@@ -325,6 +339,44 @@ describe("gateway server chat", () => {
       expect(older.oldestSeq).toBe(1);
       expect(older.newestSeq).toBe(2);
       expect(older.nextBeforeSeq).toBeNull();
+    });
+  });
+
+  test("chat.history cursors follow messages returned after byte caps", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      const sessionDir = await prepareMainHistoryHarness({
+        ws,
+        createSessionDir,
+        historyMaxBytes: 1_600,
+      });
+      const text = "x".repeat(520);
+      await writeMainSessionTranscript(
+        sessionDir,
+        Array.from({ length: 6 }, (_value, index) =>
+          JSON.stringify({
+            message: {
+              role: index % 2 === 0 ? "user" : "assistant",
+              content: [{ type: "text", text: `history-${index + 1}:${text}` }],
+              timestamp: index + 1,
+            },
+          }),
+        ),
+      );
+
+      const recent = await fetchHistoryPayload(ws, { limit: 6 });
+      const recentSeqs = historySeqs(recent.messages);
+      expect(recentSeqs.length).toBeGreaterThan(0);
+      expect(recentSeqs[0]).toBeGreaterThan(1);
+      expect(recent.hasMore).toBe(true);
+      expect(recent.oldestSeq).toBe(recentSeqs[0]);
+      expect(recent.nextBeforeSeq).toBe(recentSeqs[0]);
+
+      const older = await fetchHistoryPayload(ws, {
+        beforeSeq: recent.nextBeforeSeq ?? undefined,
+        limit: 6,
+      });
+      const olderSeqs = historySeqs(older.messages);
+      expect(Math.max(...olderSeqs)).toBeLessThan(recentSeqs[0]);
     });
   });
 
