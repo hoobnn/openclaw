@@ -121,6 +121,7 @@ import {
   resolveGatewayModelSupportsImages,
   resolveGatewaySessionThinkingDefault,
   resolveDeletedAgentIdFromSessionKey,
+  readRecentSessionMessagesWithStatsAsync,
   resolveSessionModelRef,
   visitSessionMessagesReverseAsync,
 } from "../session-utils.js";
@@ -1429,6 +1430,7 @@ async function readProjectedChatHistoryPageAsync(params: {
   beforeSeq?: number;
   effectiveMaxChars?: number;
   entry: Parameters<typeof augmentChatHistoryWithCliSessionImports>[0]["entry"];
+  maxHistoryBytes: number;
   maxMessages: number;
   provider?: string;
   sessionFile?: string;
@@ -1438,6 +1440,38 @@ async function readProjectedChatHistoryPageAsync(params: {
   const localMessagesReversed: unknown[] = [];
   let displayableCount = 0;
   let hasMore = false;
+  if (typeof params.beforeSeq !== "number") {
+    const recent =
+      params.sessionId && params.storePath
+        ? await readRecentSessionMessagesWithStatsAsync(
+            params.sessionId,
+            params.storePath,
+            params.sessionFile,
+            {
+              maxMessages: Math.min(1000, Math.max(params.maxMessages, params.maxMessages * 10)),
+              maxBytes: Math.max(params.maxHistoryBytes * 2, 1024 * 1024),
+            },
+          )
+        : { messages: [], totalMessages: 0 };
+    const rawMessages = augmentChatHistoryWithCliSessionImports({
+      entry: params.entry,
+      provider: params.provider,
+      localMessages: recent.messages,
+    });
+    const projected = augmentChatHistoryWithCanvasBlocks(
+      projectRecentChatDisplayMessages(rawMessages, {
+        maxChars: params.effectiveMaxChars,
+      }),
+    );
+    const messages = projected.slice(-params.maxMessages);
+    const oldestSeq = messages
+      .map((message) => extractChatHistoryTranscriptSeq(message))
+      .find((seq) => typeof seq === "number");
+    return {
+      hasMore: typeof oldestSeq === "number" ? recent.totalMessages > oldestSeq : false,
+      messages,
+    };
+  }
   if (params.sessionId && params.storePath) {
     await visitSessionMessagesReverseAsync(
       params.sessionId,
@@ -1459,13 +1493,8 @@ async function readProjectedChatHistoryPageAsync(params: {
       { mode: "full", reason: "chat.history" },
     );
   }
-  const rawMessages = augmentChatHistoryWithCliSessionImports({
-    entry: params.entry,
-    provider: params.provider,
-    localMessages: localMessagesReversed.reverse(),
-  });
   const projected = augmentChatHistoryWithCanvasBlocks(
-    projectRecentChatDisplayMessages(rawMessages, {
+    projectRecentChatDisplayMessages(localMessagesReversed.reverse(), {
       maxChars: params.effectiveMaxChars,
     }),
   );
@@ -2219,6 +2248,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       beforeSeq,
       effectiveMaxChars,
       entry,
+      maxHistoryBytes,
       maxMessages: max,
       provider: resolvedSessionModel.provider,
       sessionFile: entry?.sessionFile,
