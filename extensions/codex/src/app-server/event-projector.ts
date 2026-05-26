@@ -1427,6 +1427,7 @@ export class CodexAppServerEventProjector {
     return (
       (await readCodexMirroredSessionHistoryMessages({
         agentId: sessionAgentId,
+        path: this.params.path,
         sessionId: this.params.sessionId,
       })) ?? []
     );
