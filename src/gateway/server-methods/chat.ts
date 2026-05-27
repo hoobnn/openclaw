@@ -123,7 +123,6 @@ import {
   resolveGatewaySessionThinkingDefault,
   resolveDeletedAgentIdFromSessionKey,
   readRecentSessionMessagesWithStatsAsync,
-  readSessionMessagesAsync,
   resolveSessionModelRef,
   visitSessionMessagesReverseAsync,
 } from "../session-utils.js";
@@ -1457,10 +1456,17 @@ async function readProjectedChatHistoryPageAsync(params: {
   if (hasImportedMessages) {
     const localMessages =
       params.sessionId && params.storePath
-        ? await readSessionMessagesAsync(params.sessionId, params.storePath, params.sessionFile, {
-            mode: "full",
-            reason: "chat.history.cli_import",
-          })
+        ? (
+            await readRecentSessionMessagesWithStatsAsync(
+              params.sessionId,
+              params.storePath,
+              params.sessionFile,
+              {
+                maxMessages: 1000,
+                maxBytes: Math.max(params.maxHistoryBytes * 2, 1024 * 1024),
+              },
+            )
+          ).messages
         : [];
     const mergedMessages = attachChatHistoryPageSeqs(
       augmentChatHistoryWithCliSessionImports({
