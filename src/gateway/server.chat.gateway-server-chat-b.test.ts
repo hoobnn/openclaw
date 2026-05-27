@@ -330,6 +330,14 @@ describe("gateway server chat", () => {
       expect(recent.newestSeq).toBe(6);
       expect(recent.nextBeforeSeq).toBe(5);
 
+      const newest = await fetchHistoryPayload(ws, { limit: 1 });
+      expect(newest.messages?.map((message) => JSON.stringify(message))).toEqual([
+        expect.stringContaining("recent answer"),
+      ]);
+      expect(newest.hasMore).toBe(true);
+      expect(newest.oldestSeq).toBe(6);
+      expect(newest.nextBeforeSeq).toBe(6);
+
       const older = await fetchHistoryPayload(ws, { beforeSeq: 5, limit: 2 });
       expect(older.messages?.map((message) => JSON.stringify(message))).toEqual([
         expect.stringContaining("older question"),

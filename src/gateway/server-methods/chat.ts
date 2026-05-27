@@ -1471,7 +1471,7 @@ async function readProjectedChatHistoryPageAsync(params: {
       .map((message) => extractChatHistoryTranscriptSeq(message))
       .find((seq) => typeof seq === "number");
     return {
-      hasMore: typeof oldestSeq === "number" ? recent.totalMessages > oldestSeq : false,
+      hasMore: typeof oldestSeq === "number" ? oldestSeq > 1 : false,
       messages,
     };
   }
