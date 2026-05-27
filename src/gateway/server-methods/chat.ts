@@ -1431,9 +1431,13 @@ function buildChatHistoryPageMetadata(params: { hasMore: boolean; messages: unkn
 }
 
 function attachChatHistoryPageSeqs(messages: unknown[]): unknown[] {
-  return messages.map((message, index) =>
-    attachOpenClawTranscriptMeta(message, { seq: index + 1 }),
-  );
+  return messages.map((message, index) => {
+    const transcriptSeq = extractChatHistoryTranscriptSeq(message);
+    return attachOpenClawTranscriptMeta(message, {
+      seq: index + 1,
+      ...(typeof transcriptSeq === "number" ? { transcriptSeq } : {}),
+    });
+  });
 }
 
 async function readProjectedChatHistoryPageAsync(params: {
@@ -1468,35 +1472,45 @@ async function readProjectedChatHistoryPageAsync(params: {
             )
           ).messages
         : [];
-    const mergedMessages = attachChatHistoryPageSeqs(
-      augmentChatHistoryWithCliSessionImports({
-        entry: params.entry,
-        provider: params.provider,
-        localMessages,
-      }),
-    );
-    const projected = augmentChatHistoryWithCanvasBlocks(
-      projectRecentChatDisplayMessages(mergedMessages, {
-        maxChars: params.effectiveMaxChars,
-      }),
-      typeof params.beforeSeq === "number" ? { flushPendingToLastAssistant: false } : undefined,
-    );
-    const candidates =
-      typeof params.beforeSeq === "number"
-        ? projected.filter((message) => {
-            const seq = extractChatHistoryTranscriptSeq(message);
-            return typeof seq === "number" && seq < params.beforeSeq!;
-          })
-        : projected;
-    const messages = candidates.slice(-params.maxMessages);
-    const oldestSeq = messages
+    const localTailOldestSeq = localMessages
       .map((message) => extractChatHistoryTranscriptSeq(message))
       .find((seq) => typeof seq === "number");
-    if (typeof oldestSeq === "number") {
-      return {
-        hasMore: oldestSeq > 1,
-        messages,
-      };
+    const shouldUseLocalCursor =
+      typeof params.beforeSeq === "number" &&
+      typeof localTailOldestSeq === "number" &&
+      localTailOldestSeq > 1 &&
+      params.beforeSeq <= localMessages.length;
+    if (!shouldUseLocalCursor) {
+      const mergedMessages = attachChatHistoryPageSeqs(
+        augmentChatHistoryWithCliSessionImports({
+          entry: params.entry,
+          provider: params.provider,
+          localMessages,
+        }),
+      );
+      const projected = augmentChatHistoryWithCanvasBlocks(
+        projectRecentChatDisplayMessages(mergedMessages, {
+          maxChars: params.effectiveMaxChars,
+        }),
+        typeof params.beforeSeq === "number" ? { flushPendingToLastAssistant: false } : undefined,
+      );
+      const candidates =
+        typeof params.beforeSeq === "number"
+          ? projected.filter((message) => {
+              const seq = extractChatHistoryTranscriptSeq(message);
+              return typeof seq === "number" && seq < params.beforeSeq!;
+            })
+          : projected;
+      const messages = candidates.slice(-params.maxMessages);
+      const oldestSeq = messages
+        .map((message) => extractChatHistoryTranscriptSeq(message))
+        .find((seq) => typeof seq === "number");
+      if (typeof oldestSeq === "number") {
+        return {
+          hasMore: oldestSeq > 1,
+          messages,
+        };
+      }
     }
   }
   const localMessagesReversed: unknown[] = [];
