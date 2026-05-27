@@ -742,10 +742,21 @@ export function readBrowserVersion(executablePath: string): string | null {
   }
 
   const output = execText(executablePath, ["--version"], BROWSER_VERSION_TIMEOUT_MS);
-  if (!output) {
-    return null;
+  if (output) {
+    return output.replace(/\s+/g, " ").trim();
   }
-  return output.replace(/\s+/g, " ").trim();
+
+  // On Windows, `chrome.exe --version` often opens a browser window instead of
+  // printing the version. Fall back to reading the file version metadata from
+  // the PE binary via PowerShell.
+  if (process.platform === "win32") {
+    const winVersion = readWindowsFileVersion(executablePath);
+    if (winVersion) {
+      return winVersion;
+    }
+  }
+
+  return null;
 }
 
 function readMacBundleBrowserVersion(executablePath: string): string | null {
@@ -768,6 +779,25 @@ function resolveMacAppBundlePath(executablePath: string): string | null {
     return null;
   }
   return parts.slice(0, appIndex + 1).join(path.sep) || path.sep;
+}
+
+function readWindowsFileVersion(executablePath: string): string | null {
+  // PowerShell's VersionInfo.ProductVersion reads the PE file metadata without
+  // launching the binary. This is the same value shown in the Windows file
+  // properties dialog and is more reliable than `chrome.exe --version`.
+  const psCommand = `(Get-Item -LiteralPath '${executablePath.replace(/'/g, "''")}').VersionInfo.ProductVersion`;
+  const output = execText(
+    "powershell.exe",
+    ["-NoProfile", "-Command", psCommand],
+    BROWSER_VERSION_TIMEOUT_MS,
+  );
+  if (!output) {
+    return null;
+  }
+  const trimmed = output.trim();
+  // Ignore empty or error-like output (e.g. empty string when the file has no
+  // version metadata).
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export function parseBrowserMajorVersion(rawVersion: string | null | undefined): number | null {
