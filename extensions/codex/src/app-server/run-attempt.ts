@@ -1523,6 +1523,11 @@ export async function runCodexAppServerAttempt(
     });
     nativeHookRelay = createCodexNativeHookRelay({
       options: options.nativeHookRelay,
+      generation: startupBinding?.nativeHookRelayGeneration,
+      generationMismatchGraceMs:
+        startupBinding?.threadId && !startupBinding.nativeHookRelayGeneration
+          ? CODEX_NATIVE_HOOK_RELAY_TTL_GRACE_MS
+          : undefined,
       events: nativeHookRelayEvents,
       agentId: sessionAgentId,
       sessionId: params.sessionId,
@@ -1697,6 +1702,7 @@ export async function runCodexAppServerAttempt(
                 developerInstructions: promptBuild.developerInstructions,
                 config: threadConfig,
                 finalConfigPatch: nativeHookRelayConfig,
+                nativeHookRelayGeneration: nativeHookRelay?.generation,
                 nativeCodeModeEnabled: nativeToolSurfaceEnabled,
                 nativeCodeModeOnlyEnabled: appServer.codeModeOnly,
                 userMcpServersEnabled: nativeToolSurfaceEnabled,
@@ -3945,6 +3951,8 @@ function createCodexNativeHookRelay(params: {
         gatewayTimeoutMs?: number;
       }
     | undefined;
+  generation?: string;
+  generationMismatchGraceMs?: number;
   events: readonly NativeHookRelayEvent[];
   agentId: string | undefined;
   sessionId: string;
@@ -3967,6 +3975,10 @@ function createCodexNativeHookRelay(params: {
       sessionId: params.sessionId,
       sessionKey: params.sessionKey,
     }),
+    ...(params.generation ? { generation: params.generation } : {}),
+    ...(params.generationMismatchGraceMs
+      ? { generationMismatchGraceMs: params.generationMismatchGraceMs }
+      : {}),
     ...(params.agentId ? { agentId: params.agentId } : {}),
     sessionId: params.sessionId,
     ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
