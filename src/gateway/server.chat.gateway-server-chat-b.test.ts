@@ -1069,6 +1069,79 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.history paginates imported claude-cli sessions", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      await connectOk(ws);
+      const sessionDir = await createSessionDir();
+      const originalHome = process.env.HOME;
+      const homeDir = path.join(sessionDir, "home");
+      const cliSessionId = "5b8b202c-f6bb-4046-9475-d2f15fd07531";
+      const claudeProjectsDir = path.join(homeDir, ".claude", "projects", "workspace");
+      await fs.mkdir(claudeProjectsDir, { recursive: true });
+      await fs.writeFile(
+        path.join(claudeProjectsDir, `${cliSessionId}.jsonl`),
+        [
+          ["user-1", "user", "older imported user"],
+          ["assistant-1", "assistant", "older imported assistant"],
+          ["user-2", "user", "recent imported user"],
+          ["assistant-2", "assistant", "recent imported assistant"],
+        ]
+          .map(([uuid, type, text], index) =>
+            JSON.stringify({
+              type,
+              uuid,
+              timestamp: `2026-03-26T16:29:5${index}.500Z`,
+              message: {
+                role: type,
+                content: type === "user" ? text : [{ type: "text", text }],
+              },
+            }),
+          )
+          .join("\n"),
+        "utf-8",
+      );
+      process.env.HOME = homeDir;
+      try {
+        await writeSessionStore({
+          entries: {
+            main: {
+              sessionId: "sess-main",
+              updatedAt: Date.now(),
+              modelProvider: "claude-cli",
+              model: "claude-sonnet-4-6",
+              cliSessionBindings: {
+                "claude-cli": {
+                  sessionId: cliSessionId,
+                },
+              },
+            },
+          },
+        });
+
+        const recent = await fetchHistoryPayload(ws, { limit: 2 });
+        expect(recent.messages?.map((message) => JSON.stringify(message))).toEqual([
+          expect.stringContaining("recent imported user"),
+          expect.stringContaining("recent imported assistant"),
+        ]);
+        expect(recent.hasMore).toBe(true);
+        expect(recent.nextBeforeSeq).toBe(3);
+
+        const older = await fetchHistoryPayload(ws, { beforeSeq: 3, limit: 2 });
+        expect(older.messages?.map((message) => JSON.stringify(message))).toEqual([
+          expect.stringContaining("older imported user"),
+          expect.stringContaining("older imported assistant"),
+        ]);
+        expect(older.hasMore).toBe(false);
+      } finally {
+        if (originalHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = originalHome;
+        }
+      }
+    });
+  });
+
   test("chat.history hard-caps single oversized nested payloads", async () => {
     await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
       const historyMaxBytes = 64 * 1024;
