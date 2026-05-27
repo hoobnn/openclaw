@@ -71,7 +71,12 @@ import {
   resolveAcpSpawnStreamLogPath,
   startAcpSpawnParentStreamRelay,
 } from "./acp-spawn-parent-stream.js";
-import { listAgentIds, resolveAgentConfig, resolveDefaultAgentId } from "./agent-scope.js";
+import {
+  listAgentIds,
+  resolveAgentConfig,
+  resolveAgentExplicitModelPrimary,
+  resolveDefaultAgentId,
+} from "./agent-scope.js";
 import {
   findAcpUnsupportedInheritedToolAllow,
   findAcpUnsupportedInheritedToolDeny,
@@ -1359,13 +1364,14 @@ export async function spawnAcpDirect(
       timeoutMs: 10_000,
     });
     sessionCreated = true;
+    const acpResolvedModel = params.model ?? resolveAgentExplicitModelPrimary(cfg, targetAgentId);
     const initializedSession = await initializeAcpSpawnRuntime({
       cfg,
       sessionKey,
       targetAgentId,
       runtimeMode,
       resumeSessionId: params.resumeSessionId,
-      model: params.model,
+      model: acpResolvedModel,
       thinking: params.thinking,
       runTimeoutSeconds: params.runTimeoutSeconds,
       cwd: runtimeCwd,
