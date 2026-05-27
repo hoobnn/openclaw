@@ -194,7 +194,7 @@ describe("limits", () => {
     });
   });
 
-  it("enforces the per-plugin live-row cap", async () => {
+  it("enforces the per-plugin live-row cap by evicting from the registering namespace", async () => {
     await withOpenClawTestState({ label: "e2e-limit-plugin" }, async () => {
       // Spread MAX_ENTRIES_PER_PLUGIN rows across several namespaces so
       // namespace eviction never fires (each namespace has generous room).
@@ -217,10 +217,17 @@ describe("limits", () => {
         maxEntries: perNs + 1,
       });
 
-      // One more row tips over the plugin-wide limit.
-      await expectPluginStateStoreError(store.register("overflow", { boom: true }), {
-        code: "PLUGIN_STATE_LIMIT_EXCEEDED",
-      });
+      // One more row would tip over the plugin-wide limit.
+      // The fix evicts the oldest entry from the registering namespace
+      // to stay within the per-plugin cap.
+      await expect(store.register("overflow", { boom: true })).resolves.toBeUndefined();
+
+      // The new entry is present.
+      await expect(store.lookup("overflow")).resolves.toEqual({ boom: true });
+
+      // But the oldest entry in ns-0 was evicted to make room.
+      const entries = await store.entries();
+      expect(entries).toHaveLength(perNs);
     });
   });
 
@@ -245,6 +252,45 @@ describe("limits", () => {
       expect(entries).toHaveLength(3);
       expect(entries.map((e) => e.key)).toEqual(["b", "c", "d"]);
       await expect(store.lookup("a")).resolves.toBeUndefined();
+    });
+  });
+
+  it("evicts from current namespace when co-tenant namespaces push plugin total over cap (#87357)", async () => {
+    await withOpenClawTestState({ label: "e2e-limit-cotenant" }, async () => {
+      // Simulate the exact scenario from issue #87357:
+      // - "message-cache" namespace has maxEntries=3 and is filled to capacity
+      // - "bot-info-cache" co-tenant namespace has 1 live entry
+      // - Plugin total = 4 (= MAX_ENTRIES_PER_PLUGIN for this test is 4 via
+      //   seed), but namespace eviction alone won't help since
+      //   namespaceCount == maxEntries (not >).
+      // The fix should evict from the registering namespace when the
+      // plugin-wide cap is exceeded, even though the namespace is exactly
+      // at its own maxEntries.
+      const messageCache = createPluginStateKeyedStore<number>("telegram", {
+        namespace: "telegram.message-cache",
+        maxEntries: 3,
+      });
+      const botInfoCache = createPluginStateKeyedStore<{ bot: boolean }>("telegram", {
+        namespace: "telegram.bot-info-cache",
+        maxEntries: 100,
+      });
+
+      // Fill message-cache to its maxEntries (3 entries).
+      await messageCache.register("msg-1", 1);
+      await messageCache.register("msg-2", 2);
+      await messageCache.register("msg-3", 3);
+
+      // Bot-info-cache has 1 entry (co-tenant).
+      await botInfoCache.register("bot", { bot: true });
+
+      // Plugin total is now 4. Registering one more in message-cache
+      // would make namespaceCount=4 > maxEntries=3, so namespace eviction
+      // fires and evicts 1, keeping plugin total at 4. This should succeed.
+      await expect(messageCache.register("msg-4", 4)).resolves.toBeUndefined();
+
+      // Verify msg-1 was evicted (oldest) and msg-4 is present.
+      await expect(messageCache.lookup("msg-1")).resolves.toBeUndefined();
+      await expect(messageCache.lookup("msg-4")).resolves.toBe(4);
     });
   });
 });

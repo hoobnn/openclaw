@@ -227,10 +227,10 @@ describe("plugin state keyed store", () => {
         namespace: "limit",
         maxEntries: 1_001,
       });
-      await expectPluginStateStoreError(limited.registerIfAbsent("overflow", { overflow: true }), {
-        code: "PLUGIN_STATE_LIMIT_EXCEEDED",
-      });
-      await expect(limited.lookup("overflow")).resolves.toBeUndefined();
+      // With the fix, the per-plugin cap enforcement evicts from the
+      // registering namespace instead of throwing, so the entry succeeds.
+      await expect(limited.registerIfAbsent("overflow", { overflow: true })).resolves.toBe(true);
+      await expect(limited.lookup("overflow")).resolves.toEqual({ overflow: true });
     });
   });
 
@@ -361,14 +361,16 @@ describe("plugin state keyed store", () => {
         maxEntries: 10,
       });
 
-      await expectPluginStateStoreError(limitStore.register("overflow", { overflow: true }), {
-        code: "PLUGIN_STATE_LIMIT_EXCEEDED",
-      });
+      // With the fix, the per-plugin cap enforcement evicts from the
+      // registering namespace instead of throwing.
+      await expect(limitStore.register("overflow", { overflow: true })).resolves.toBeUndefined();
+      // Sibling namespace is untouched.
       await expect(siblingStore.lookup("k-0")).resolves.toEqual({
         namespaceIndex: 1,
         entryIndex: 0,
       });
-      await expect(limitStore.lookup("overflow")).resolves.toBeUndefined();
+      // The new entry is present.
+      await expect(limitStore.lookup("overflow")).resolves.toEqual({ overflow: true });
     });
   });
 

@@ -416,18 +416,36 @@ function enforcePostRegisterLimits(params: {
     );
   }
 
-  const pluginCount = countRow(
+  let pluginCount = countRow(
     params.store.statements.countLivePlugin.get(params.pluginId, params.now) as
       | CountRow
       | undefined,
   );
   if (pluginCount > MAX_ENTRIES_PER_PLUGIN) {
-    throw createPluginStateError({
-      code: "PLUGIN_STATE_LIMIT_EXCEEDED",
-      operation: "register",
-      message: `Plugin state for ${params.pluginId} exceeds the ${MAX_ENTRIES_PER_PLUGIN} live row limit.`,
-      path: params.store.path,
-    });
+    // The per-plugin cap may be exceeded due to entries in sibling namespaces
+    // even when the current namespace is at or below its own maxEntries.
+    // Evict oldest entries from the current namespace to make room.
+    const overBy = pluginCount - MAX_ENTRIES_PER_PLUGIN;
+    params.store.statements.deleteOldestNamespace.run(
+      params.pluginId,
+      params.namespace,
+      params.protectedKey,
+      params.now,
+      overBy,
+    );
+    pluginCount = countRow(
+      params.store.statements.countLivePlugin.get(params.pluginId, params.now) as
+        | CountRow
+        | undefined,
+    );
+    if (pluginCount > MAX_ENTRIES_PER_PLUGIN) {
+      throw createPluginStateError({
+        code: "PLUGIN_STATE_LIMIT_EXCEEDED",
+        operation: "register",
+        message: `Plugin state for ${params.pluginId} exceeds the ${MAX_ENTRIES_PER_PLUGIN} live row limit.`,
+        path: params.store.path,
+      });
+    }
   }
 }
 
