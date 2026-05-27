@@ -1587,10 +1587,12 @@ async function readProjectedChatHistoryPageAsync(params: {
         .map((message) => extractChatHistoryTranscriptSeq(message))
         .find((seq) => typeof seq === "number");
     }
-    return {
-      hasMore: typeof oldestSeq === "number" ? oldestSeq > 1 : false,
-      messages,
-    };
+    if (typeof oldestSeq === "number") {
+      return {
+        hasMore: oldestSeq > 1,
+        messages,
+      };
+    }
   }
   if (params.sessionId && params.storePath) {
     await visitSessionMessagesReverseAsync(
