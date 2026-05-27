@@ -141,8 +141,8 @@ layer stack for Telegram direct, Discord group, and heartbeat turns. That stack
 includes a pinned Codex `gpt-5.5` model prompt fixture generated from Codex's
 model catalog/cache shape, the Codex happy-path permission developer text,
 OpenClaw developer instructions, turn-scoped collaboration-mode instructions
-when OpenClaw provides them, user turn input, and references to the dynamic tool
-specs.
+for cron and heartbeat turns when OpenClaw provides them, user turn input, and
+references to the dynamic tool specs.
 
 Refresh the pinned Codex model prompt fixture with
 `pnpm prompt:snapshots:sync-codex-model`. By default, the script looks for

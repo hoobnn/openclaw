@@ -239,12 +239,13 @@ const CODEX_NATIVE_SANDBOX_TOOL_REQUIREMENTS = [
 ] as const;
 const CODEX_MEMORY_FLUSH_DYNAMIC_TOOL_ALLOW = new Set(["read", "write"]);
 const CODEX_NATIVE_PROJECT_DOC_BASENAMES = new Set(["agents.md"]);
-const CODEX_INHERITED_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES = new Set(["tools.md"]);
-const CODEX_TURN_SCOPED_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES = new Set([
+const CODEX_INHERITED_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES = new Set([
   "identity.md",
   "soul.md",
+  "tools.md",
   "user.md",
 ]);
+const CODEX_TURN_SCOPED_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES = new Set<string>();
 const CODEX_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES = new Set([
   ...CODEX_INHERITED_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES,
   ...CODEX_TURN_SCOPED_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES,
@@ -1345,7 +1346,6 @@ export async function runCodexAppServerAttempt(
     buildDeveloperInstructions(params, {
       dynamicTools: toolBridge.availableSpecs,
     }),
-    workspaceBootstrapContext.developerInstructions,
   );
   const openClawPromptContext = buildCodexOpenClawPromptContext({
     params,
@@ -1472,9 +1472,14 @@ export async function runCodexAppServerAttempt(
       heartbeatCollaborationInstructions:
         workspaceBootstrapContext.heartbeatCollaborationInstructions,
     }).settings.developer_instructions ?? undefined;
-  const buildRenderedCodexDeveloperInstructions = () =>
+  const buildCodexThreadDeveloperInstructions = () =>
     joinPresentSections(
       promptBuild.developerInstructions,
+      workspaceBootstrapContext.developerInstructions,
+    );
+  const buildRenderedCodexDeveloperInstructions = () =>
+    joinPresentSections(
+      buildCodexThreadDeveloperInstructions(),
       buildCodexTurnCollaborationDeveloperInstructions(),
     );
   const systemPromptReport = buildCodexSystemPromptReport({
@@ -1694,7 +1699,7 @@ export async function runCodexAppServerAttempt(
                 cwd: startupExecutionCwd,
                 dynamicTools: toolBridge.specs,
                 appServer: pluginAppServer,
-                developerInstructions: promptBuild.developerInstructions,
+                developerInstructions: buildCodexThreadDeveloperInstructions(),
                 config: threadConfig,
                 finalConfigPatch: nativeHookRelayConfig,
                 nativeCodeModeEnabled: nativeToolSurfaceEnabled,
@@ -1833,7 +1838,7 @@ export async function runCodexAppServerAttempt(
   recordCodexTrajectoryContext(trajectoryRecorder, {
     attempt: params,
     cwd: effectiveWorkspace,
-    developerInstructions: promptBuild.developerInstructions,
+    developerInstructions: buildCodexThreadDeveloperInstructions(),
     prompt: codexTurnPromptText,
     tools: toolBridge.availableSpecs,
   });
@@ -5920,7 +5925,7 @@ function renderCodexWorkspaceBootstrapPromptContext(
     return undefined;
   }
   const lines = [
-    "OpenClaw loaded these user-editable workspace files for the current turn. Codex loads AGENTS.md natively. TOOLS.md is provided as inherited Codex developer instructions. SOUL.md, IDENTITY.md, and USER.md are provided as turn-scoped collaboration instructions so native Codex subagents do not inherit them. HEARTBEAT.md is handled by heartbeat collaboration-mode guidance. Those files are not repeated here.",
+    "OpenClaw loaded these user-editable workspace files for the current turn. Codex loads AGENTS.md natively. SOUL.md, IDENTITY.md, TOOLS.md, and USER.md are provided as Codex developer instructions so stable agent identity and workspace guidance are not repeated in every turn. HEARTBEAT.md is handled by heartbeat collaboration-mode guidance. Those files are not repeated here.",
     "",
     "# Project Context",
     "",

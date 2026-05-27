@@ -6422,6 +6422,57 @@ describe("runCodexAppServerAttempt", () => {
     ]);
   });
 
+  it("preserves stable workspace identity files when before_prompt_build replaces Codex developer instructions", async () => {
+    const beforePromptBuild = vi.fn(async () => ({
+      systemPrompt: "hook replacement codex system",
+    }));
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([{ hookName: "before_prompt_build", handler: beforePromptBuild }]),
+    );
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const soulGuidance = "Soul guidance that must stay session-scoped.";
+    const identityGuidance = "Identity guidance that must stay session-scoped.";
+    const toolGuidance = "Tool guidance that must stay session-scoped.";
+    const userProfile = "User profile that must stay session-scoped.";
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, "SOUL.md"), soulGuidance);
+    await fs.writeFile(path.join(workspaceDir, "IDENTITY.md"), identityGuidance);
+    await fs.writeFile(path.join(workspaceDir, "TOOLS.md"), toolGuidance);
+    await fs.writeFile(path.join(workspaceDir, "USER.md"), userProfile);
+    const harness = createStartedThreadHarness();
+
+    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+    await harness.waitForMethod("turn/start");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+    const result = await run;
+
+    expect(beforePromptBuild).toHaveBeenCalledOnce();
+    const threadStart = harness.requests.find((request) => request.method === "thread/start");
+    const threadStartParams = threadStart?.params as { developerInstructions?: string };
+    expect(threadStartParams.developerInstructions).toContain("hook replacement codex system");
+    expect(threadStartParams.developerInstructions).toContain("OpenClaw Workspace Instructions");
+    expect(threadStartParams.developerInstructions).toContain(soulGuidance);
+    expect(threadStartParams.developerInstructions).toContain(identityGuidance);
+    expect(threadStartParams.developerInstructions).toContain(toolGuidance);
+    expect(threadStartParams.developerInstructions).toContain(userProfile);
+
+    const turnStart = harness.requests.find((request) => request.method === "turn/start");
+    const turnStartParams = turnStart?.params as {
+      collaborationMode?: { settings?: { developer_instructions?: string | null } };
+    };
+    const collaborationInstructions =
+      turnStartParams.collaborationMode?.settings?.developer_instructions ?? "";
+    expect(collaborationInstructions).not.toContain(soulGuidance);
+    expect(collaborationInstructions).not.toContain(identityGuidance);
+    expect(collaborationInstructions).not.toContain(toolGuidance);
+    expect(collaborationInstructions).not.toContain(userProfile);
+    expect(result.systemPromptReport?.systemPrompt.chars).toBe(
+      (threadStartParams.developerInstructions ?? "").length,
+    );
+  });
+
   it("projects mirrored history when starting Codex without a native thread binding", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
@@ -6548,7 +6599,7 @@ describe("runCodexAppServerAttempt", () => {
     expect(secondInputText).toContain("continue from there");
   });
 
-  it("passes stable workspace files as Codex developer instructions and keeps MEMORY.md as turn context", async () => {
+  it("passes stable workspace identity files as Codex thread developer instructions and keeps MEMORY.md as turn context", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
     const agentsGuidance = "Follow AGENTS guidance.";
@@ -6582,10 +6633,10 @@ describe("runCodexAppServerAttempt", () => {
     const config = threadStartParams.config;
 
     expect(threadStartParams.developerInstructions).toContain("OpenClaw Workspace Instructions");
-    expect(threadStartParams.developerInstructions).not.toContain(soulGuidance);
-    expect(threadStartParams.developerInstructions).not.toContain(identityGuidance);
+    expect(threadStartParams.developerInstructions).toContain(soulGuidance);
+    expect(threadStartParams.developerInstructions).toContain(identityGuidance);
     expect(threadStartParams.developerInstructions).toContain(toolGuidance);
-    expect(threadStartParams.developerInstructions).not.toContain(userProfile);
+    expect(threadStartParams.developerInstructions).toContain(userProfile);
     expect(threadStartParams.developerInstructions).not.toContain(heartbeatChecklist);
     expect(threadStartParams.developerInstructions).not.toContain(memorySummary);
     expect(threadStartParams.developerInstructions).not.toContain("Codex loads AGENTS.md natively");
@@ -6603,13 +6654,11 @@ describe("runCodexAppServerAttempt", () => {
     };
     const collaborationInstructions =
       turnStartParams.collaborationMode?.settings?.developer_instructions ?? "";
-    expect(collaborationInstructions).toContain("# Collaboration Mode: Default");
-    expect(collaborationInstructions).toContain("request_user_input availability");
-    expect(collaborationInstructions).toContain("OpenClaw Agent Soul");
-    expect(collaborationInstructions).toContain(soulGuidance);
-    expect(collaborationInstructions).toContain(identityGuidance);
+    expect(collaborationInstructions).not.toContain("OpenClaw Agent Soul");
+    expect(collaborationInstructions).not.toContain(soulGuidance);
+    expect(collaborationInstructions).not.toContain(identityGuidance);
     expect(collaborationInstructions).not.toContain(toolGuidance);
-    expect(collaborationInstructions).toContain(userProfile);
+    expect(collaborationInstructions).not.toContain(userProfile);
     expect(collaborationInstructions).not.toContain(heartbeatChecklist);
     expect(collaborationInstructions).not.toContain(memorySummary);
     const inputText = turnStartParams.input?.[0]?.text ?? "";
@@ -6626,8 +6675,7 @@ describe("runCodexAppServerAttempt", () => {
     expect(inputText).not.toContain(agentsGuidance);
     expect(inputText).toContain("Current user request:\nhello");
     expect(result.systemPromptReport?.systemPrompt.chars).toBe(
-      [threadStartParams.developerInstructions ?? "", collaborationInstructions].join("\n\n")
-        .length,
+      (threadStartParams.developerInstructions ?? "").length,
     );
 
     const fileStats = new Map(
