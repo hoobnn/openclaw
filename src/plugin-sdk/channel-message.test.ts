@@ -3,10 +3,10 @@ import { defineChannelMessageAdapter } from "./channel-outbound.js";
 
 describe("defineChannelMessageAdapter", () => {
   it("keeps new and legacy channel plugin SDK subpaths importable", async () => {
-    const [channelOutbound, channelMessage, channelMessageRuntime, channelReplyPipeline, compat] =
+    const [channelMessage, channelOutbound, channelMessageRuntime, channelReplyPipeline, compat] =
       await Promise.all([
-        import("openclaw/plugin-sdk/channel-outbound"),
         import("openclaw/plugin-sdk/channel-message"),
+        import("openclaw/plugin-sdk/channel-outbound"),
         import("openclaw/plugin-sdk/channel-message-runtime"),
         import("openclaw/plugin-sdk/channel-reply-pipeline"),
         import("openclaw/plugin-sdk/compat"),
@@ -27,6 +27,9 @@ describe("defineChannelMessageAdapter", () => {
     );
     expect(channelMessageRuntime.withDurableMessageSendContext).toBe(
       channelMessage.withDurableMessageSendContext,
+    );
+    expect(channelOutbound.defineChannelMessageAdapter).toBe(
+      channelMessage.defineChannelMessageAdapter,
     );
     expect(compat.createChannelReplyPipeline).toBe(channelReplyPipeline.createChannelReplyPipeline);
   });
