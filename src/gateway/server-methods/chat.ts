@@ -1457,6 +1457,7 @@ async function readProjectedChatHistoryPageAsync(params: {
       provider: params.provider,
       localMessages: [],
     }).length > 0;
+  let localCursorBeforeSeq = params.beforeSeq;
   if (hasImportedMessages) {
     const localMessages =
       params.sessionId && params.storePath
@@ -1475,19 +1476,38 @@ async function readProjectedChatHistoryPageAsync(params: {
     const localTailOldestSeq = localMessages
       .map((message) => extractChatHistoryTranscriptSeq(message))
       .find((seq) => typeof seq === "number");
+    const mergedMessages = attachChatHistoryPageSeqs(
+      augmentChatHistoryWithCliSessionImports({
+        entry: params.entry,
+        provider: params.provider,
+        localMessages,
+      }),
+    );
+    const cursorTranscriptSeq =
+      typeof params.beforeSeq === "number"
+        ? mergedMessages.flatMap((message) => {
+            if (extractChatHistoryTranscriptSeq(message) !== params.beforeSeq) {
+              return [];
+            }
+            const marker =
+              message &&
+              typeof message === "object" &&
+              !Array.isArray(message) &&
+              (message as { __openclaw?: unknown }).__openclaw &&
+              typeof (message as { __openclaw?: unknown }).__openclaw === "object" &&
+              !Array.isArray((message as { __openclaw?: unknown }).__openclaw)
+                ? (message as { __openclaw: Record<string, unknown> }).__openclaw
+                : undefined;
+            const transcriptSeq = marker?.transcriptSeq;
+            return typeof transcriptSeq === "number" ? [transcriptSeq] : [];
+          })[0]
+        : undefined;
     const shouldUseLocalCursor =
-      typeof params.beforeSeq === "number" &&
+      typeof cursorTranscriptSeq === "number" &&
       typeof localTailOldestSeq === "number" &&
       localTailOldestSeq > 1 &&
-      params.beforeSeq <= localMessages.length;
+      cursorTranscriptSeq <= localTailOldestSeq;
     if (!shouldUseLocalCursor) {
-      const mergedMessages = attachChatHistoryPageSeqs(
-        augmentChatHistoryWithCliSessionImports({
-          entry: params.entry,
-          provider: params.provider,
-          localMessages,
-        }),
-      );
       const projected = augmentChatHistoryWithCanvasBlocks(
         projectRecentChatDisplayMessages(mergedMessages, {
           maxChars: params.effectiveMaxChars,
@@ -1511,6 +1531,8 @@ async function readProjectedChatHistoryPageAsync(params: {
           messages,
         };
       }
+    } else {
+      localCursorBeforeSeq = cursorTranscriptSeq;
     }
   }
   const localMessagesReversed: unknown[] = [];
@@ -1576,7 +1598,7 @@ async function readProjectedChatHistoryPageAsync(params: {
       params.storePath,
       params.sessionFile,
       (message, seq) => {
-        if (typeof params.beforeSeq === "number" && seq >= params.beforeSeq) {
+        if (typeof localCursorBeforeSeq === "number" && seq >= localCursorBeforeSeq) {
           return;
         }
         localMessagesReversed.push(message);
