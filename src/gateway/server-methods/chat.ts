@@ -1503,10 +1503,9 @@ async function readProjectedChatHistoryPageAsync(params: {
           })[0]
         : undefined;
     const shouldUseLocalCursor =
-      typeof cursorTranscriptSeq === "number" &&
+      typeof params.beforeSeq === "number" &&
       typeof localTailOldestSeq === "number" &&
-      localTailOldestSeq > 1 &&
-      cursorTranscriptSeq <= localTailOldestSeq;
+      localTailOldestSeq > 1;
     if (!shouldUseLocalCursor) {
       const projected = augmentChatHistoryWithCanvasBlocks(
         projectRecentChatDisplayMessages(mergedMessages, {
@@ -1532,7 +1531,8 @@ async function readProjectedChatHistoryPageAsync(params: {
         };
       }
     } else {
-      localCursorBeforeSeq = cursorTranscriptSeq;
+      localCursorBeforeSeq =
+        typeof cursorTranscriptSeq === "number" ? cursorTranscriptSeq : params.beforeSeq;
     }
   }
   const localMessagesReversed: unknown[] = [];
