@@ -1251,7 +1251,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         const lifecycleTimestamps = entry
           ? resolveSessionLifecycleTimestamps({
               entry,
-              storePath,
+              databasePath,
               agentId: resolveAgentIdFromSessionKey(canonicalKey),
             })
           : undefined;
@@ -1440,13 +1440,38 @@ export const agentHandlers: GatewayRequestHandlers = {
         const agentId = resolveAgentIdFromSessionKey(canonicalSessionKey);
         const mainSessionKey = resolveAgentMainSessionKey({ cfg, agentId });
         const persisted = mergeSessionEntry(mergeBase, nextEntryPatch);
-        upsertSessionEntry({
-          agentId: sessionAgentId,
-          sessionKey: canonicalSessionKey,
-          entry: persisted,
-        });
+        if (!suppressVisibleSessionEffects) {
+          upsertSessionEntry({
+            agentId: sessionAgentId,
+            sessionKey: canonicalSessionKey,
+            entry: persisted,
+          });
+        }
         sessionEntry = persisted;
-        if (canonicalSessionKey === mainSessionKey || canonicalSessionKey === "global") {
+        if (!suppressVisibleSessionEffects && isNewSession) {
+          const previousSessionId =
+            entry?.sessionId && entry.sessionId !== sessionId ? entry.sessionId : undefined;
+          emitAgentSendSessionLifecycleTransition({
+            cfg,
+            sessionKey: canonicalSessionKey,
+            sessionId,
+            storePath: databasePath,
+            sessionFile: sessionEntry?.sessionFile,
+            agentId,
+            previousSessionId,
+            previousSessionFile: previousSessionId ? entry?.sessionFile : undefined,
+            previousEndReason: previousSessionId
+              ? (freshness?.staleReason ??
+                (usableRequestedSessionId && entry?.sessionId !== usableRequestedSessionId
+                  ? "new"
+                  : "unknown"))
+              : undefined,
+          });
+        }
+        if (
+          !suppressVisibleSessionEffects &&
+          (canonicalSessionKey === mainSessionKey || canonicalSessionKey === "global")
+        ) {
           context.addChatRun(idem, {
             sessionKey: canonicalSessionKey,
             clientRunId: idem,
@@ -1811,10 +1836,13 @@ export const agentHandlers: GatewayRequestHandlers = {
               skipInitialSessionTouch: skipAgentInitialSessionTouch,
               preserveUserFacingSessionModelState,
               sourceReplyDeliveryMode: request.sourceReplyDeliveryMode,
-              suppressPromptPersistence: shouldSuppressPromptPersistenceForAgentRun({
-                inputProvenance,
-                internalEvents: request.internalEvents,
-              }),
+              disableMessageTool: request.disableMessageTool,
+              suppressPromptPersistence:
+                requestedPromptPersistenceSuppression ||
+                shouldSuppressPromptPersistenceForAgentRun({
+                  inputProvenance,
+                  internalEvents: request.internalEvents,
+                }),
               initialVfsEntries: request.initialVfsEntries,
               cleanupBundleMcpOnRunEnd: request.cleanupBundleMcpOnRunEnd,
               abortSignal: activeRunAbort.controller.signal,

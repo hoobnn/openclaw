@@ -293,6 +293,7 @@ import {
   resolveAttemptTrajectoryTerminal,
   resolveTerminalAssistantTexts,
 } from "./attempt-trajectory-status.js";
+import { EmbeddedAttemptSessionTakeoverError } from "./attempt.session-lock.js";
 export { buildContextEnginePromptCacheInfo } from "./attempt.context-engine-helpers.js";
 import {
   rotateTranscriptAfterCompaction,
@@ -1166,6 +1167,28 @@ function shouldPreservePromptErrorAfterCleanupError(params: {
     Boolean(params.promptError) &&
     params.cleanupError instanceof EmbeddedAttemptSessionTakeoverError
   );
+}
+
+function getAttemptAbortReason(signal: AbortSignal): unknown {
+  return "reason" in signal ? (signal as { reason?: unknown }).reason : undefined;
+}
+
+function createAttemptAbortError(signal: AbortSignal): Error {
+  const reason = getAttemptAbortReason(signal);
+  const err =
+    reason instanceof Error
+      ? new Error(reason.message, { cause: reason })
+      : reason
+        ? new Error("aborted", { cause: reason })
+        : new Error("aborted");
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAttemptAbortSignalFired(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    throw createAttemptAbortError(signal);
+  }
 }
 
 class EmbeddedAttemptPromptErrorWithCleanupTakeoverError extends Error {
@@ -2537,6 +2560,9 @@ export async function runEmbeddedAttempt(
       const coreBuiltinToolNames = collectCoreBuiltinToolNames(uncompactedEffectiveTools, {
         isPluginTool: (tool) =>
           Boolean(getPluginToolMeta(tool as Parameters<typeof getPluginToolMeta>[0])),
+      });
+      const trustedPluginLocalMediaToolNames = collectTrustedPluginLocalMediaToolNames({
+        tools: uncompactedEffectiveTools,
       });
       const trustedLocalMediaToolNames = collectTrustedLocalMediaToolNames({
         coreBuiltinToolNames,
@@ -4459,11 +4485,11 @@ export async function runEmbeddedAttempt(
                   `proceeding with pre-compaction state runId=${params.runId} sessionId=${params.sessionId}`,
               );
             }
-          } else if (onBlockReplyFlush) {
+          } else if (params.onBlockReplyFlush) {
             // Retry-generated blocks can still be draining when the compaction
             // retry wait resolves; this second drain is idempotent when no new
             // blocks were produced.
-            await onBlockReplyFlush();
+            await params.onBlockReplyFlush();
           }
         } catch (err) {
           if (isRunnerAbortError(err)) {
@@ -5127,11 +5153,7 @@ export async function runEmbeddedAttempt(
       } catch (err) {
         cleanupError = err;
       }
-      const synthesizedCleanupTakeoverError =
-        !cleanupError && promptError && sessionLockController.hasSessionTakeover()
-          ? new EmbeddedAttemptSessionTakeoverError(params.sessionFile)
-          : undefined;
-      const cleanupFailure = cleanupError ?? synthesizedCleanupTakeoverError;
+      const cleanupFailure = cleanupError;
       const shouldPreservePromptError = shouldPreservePromptErrorAfterCleanupError({
         promptError,
         cleanupError: cleanupFailure,
