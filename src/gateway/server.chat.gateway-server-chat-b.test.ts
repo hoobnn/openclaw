@@ -388,6 +388,44 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.history backfills visible messages when the recent tail is hidden", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      const sessionDir = await prepareMainHistoryHarness({ ws, createSessionDir });
+      await writeMainSessionTranscript(sessionDir, [
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "visible before hidden tail" }],
+            timestamp: 1,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "answer before hidden tail" }],
+            timestamp: 2,
+          },
+        }),
+        ...Array.from({ length: 25 }, (_value, index) =>
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "NO_REPLY" }],
+              timestamp: 3 + index,
+            },
+          }),
+        ),
+      ]);
+
+      const recent = await fetchHistoryPayload(ws, { limit: 2 });
+      expect(recent.messages?.map((message) => JSON.stringify(message))).toEqual([
+        expect.stringContaining("visible before hidden tail"),
+        expect.stringContaining("answer before hidden tail"),
+      ]);
+      expect(recent.hasMore).toBe(false);
+    });
+  });
+
   test("chat.send returns in_flight when duplicate attachment send wins parsing race", async () => {
     const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gw-"));
     const dispatchRelease = createDeferred<void>();

@@ -1486,15 +1486,19 @@ async function readProjectedChatHistoryPageAsync(params: {
     const oldestSeq = messages
       .map((message) => extractChatHistoryTranscriptSeq(message))
       .find((seq) => typeof seq === "number");
-    return {
-      hasMore: typeof oldestSeq === "number" ? oldestSeq > 1 : false,
-      messages,
-    };
+    if (typeof oldestSeq === "number") {
+      return {
+        hasMore: oldestSeq > 1,
+        messages,
+      };
+    }
   }
   const localMessagesReversed: unknown[] = [];
+  const displayMessagesReversed: Array<Record<string, unknown>> = [];
   let displayableCount = 0;
   let hasMore = false;
   if (typeof params.beforeSeq !== "number") {
+    const recentMaxMessages = Math.min(1000, Math.max(params.maxMessages, params.maxMessages * 10));
     const recent =
       params.sessionId && params.storePath
         ? await readRecentSessionMessagesWithStatsAsync(
@@ -1502,20 +1506,45 @@ async function readProjectedChatHistoryPageAsync(params: {
             params.storePath,
             params.sessionFile,
             {
-              maxMessages: Math.min(1000, Math.max(params.maxMessages, params.maxMessages * 10)),
+              maxMessages: recentMaxMessages,
               maxBytes: Math.max(params.maxHistoryBytes * 2, 1024 * 1024),
             },
           )
         : { messages: [], totalMessages: 0 };
-    const projected = augmentChatHistoryWithCanvasBlocks(
+    let projected = augmentChatHistoryWithCanvasBlocks(
       projectRecentChatDisplayMessages(recent.messages, {
         maxChars: params.effectiveMaxChars,
       }),
     );
-    const messages = projected.slice(-params.maxMessages);
-    const oldestSeq = messages
+    let messages = projected.slice(-params.maxMessages);
+    let oldestSeq = messages
       .map((message) => extractChatHistoryTranscriptSeq(message))
       .find((seq) => typeof seq === "number");
+    if (
+      oldestSeq === undefined &&
+      recentMaxMessages < 1000 &&
+      params.sessionId &&
+      params.storePath
+    ) {
+      const broaderRecent = await readRecentSessionMessagesWithStatsAsync(
+        params.sessionId,
+        params.storePath,
+        params.sessionFile,
+        {
+          maxMessages: 1000,
+          maxBytes: Math.max(params.maxHistoryBytes * 2, 1024 * 1024),
+        },
+      );
+      projected = augmentChatHistoryWithCanvasBlocks(
+        projectRecentChatDisplayMessages(broaderRecent.messages, {
+          maxChars: params.effectiveMaxChars,
+        }),
+      );
+      messages = projected.slice(-params.maxMessages);
+      oldestSeq = messages
+        .map((message) => extractChatHistoryTranscriptSeq(message))
+        .find((seq) => typeof seq === "number");
+    }
     return {
       hasMore: typeof oldestSeq === "number" ? oldestSeq > 1 : false,
       messages,
@@ -1531,7 +1560,11 @@ async function readProjectedChatHistoryPageAsync(params: {
           return;
         }
         localMessagesReversed.push(message);
-        if (projectChatDisplayMessage(message, { maxChars: params.effectiveMaxChars })) {
+        const displayMessage = projectChatDisplayMessage(message, {
+          maxChars: params.effectiveMaxChars,
+        });
+        if (displayMessage) {
+          displayMessagesReversed.push(displayMessage);
           displayableCount += 1;
           if (displayableCount > params.maxMessages) {
             hasMore = true;
@@ -1541,6 +1574,12 @@ async function readProjectedChatHistoryPageAsync(params: {
       },
       { mode: "full", reason: "chat.history" },
     );
+  }
+  if (typeof params.beforeSeq !== "number") {
+    return {
+      hasMore,
+      messages: displayMessagesReversed.reverse().slice(-params.maxMessages),
+    };
   }
   const projected = augmentChatHistoryWithCanvasBlocks(
     projectRecentChatDisplayMessages(localMessagesReversed.reverse(), {
