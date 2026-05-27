@@ -1476,6 +1476,10 @@ async function readProjectedChatHistoryPageAsync(params: {
     const localTailOldestSeq = localMessages
       .map((message) => extractChatHistoryTranscriptSeq(message))
       .find((seq) => typeof seq === "number");
+    const longLocalTail =
+      localMessages.length >= 1000 &&
+      typeof localTailOldestSeq === "number" &&
+      localTailOldestSeq > 1;
     const mergedMessages = attachChatHistoryPageSeqs(
       augmentChatHistoryWithCliSessionImports({
         entry: params.entry,
@@ -1506,7 +1510,7 @@ async function readProjectedChatHistoryPageAsync(params: {
       typeof params.beforeSeq === "number" &&
       typeof localTailOldestSeq === "number" &&
       localTailOldestSeq > 1;
-    if (!shouldUseLocalCursor) {
+    if (!longLocalTail && !shouldUseLocalCursor) {
       const projected = augmentChatHistoryWithCanvasBlocks(
         projectRecentChatDisplayMessages(mergedMessages, {
           maxChars: params.effectiveMaxChars,
