@@ -1446,7 +1446,7 @@ async function readProjectedChatHistoryPageAsync(params: {
   sessionFile?: string;
   sessionId: string | undefined;
   storePath: string | undefined;
-}): Promise<{ hasMore: boolean; messages: Array<Record<string, unknown>> }> {
+}): Promise<{ hasMore: boolean; messages: unknown[] }> {
   const hasImportedMessages =
     augmentChatHistoryWithCliSessionImports({
       entry: params.entry,
