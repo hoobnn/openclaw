@@ -33,11 +33,13 @@ const OMITTED_PRIVATE_QA_PLUGIN_SDK_FILES = new Set([
   `dist/plugin-sdk/src/plugin-sdk/${LEGACY_QA_LAB_DIR}.d.ts`,
   "dist/plugin-sdk/src/plugin-sdk/qa-runtime.d.ts",
 ]);
+const OMITTED_DEEP_PLUGIN_SDK_DECLARATION_PREFIX = "dist/plugin-sdk/src/";
 const OMITTED_PRIVATE_QA_DIST_PREFIXES = ["dist/qa-runtime-"];
 const OMITTED_DIST_SUBTREE_PATTERNS = [
   /^dist\/extensions\/node_modules(?:\/|$)/u,
   /^dist\/extensions\/[^/]+\/node_modules(?:\/|$)/u,
   /^dist\/extensions\/qa-matrix(?:\/|$)/u,
+  /^dist\/plugin-sdk\/src(?:\/|$)/u,
   new RegExp(`^dist/plugin-sdk/extensions/${LEGACY_QA_CHANNEL_DIR}(?:/|$)`, "u"),
   new RegExp(`^dist/plugin-sdk/extensions/${LEGACY_QA_LAB_DIR}(?:/|$)`, "u"),
 ] as const;
@@ -175,6 +177,9 @@ function isPackagedDistPath(
     return false;
   }
   if (relativePath === "dist/plugin-sdk/.tsbuildinfo") {
+    return false;
+  }
+  if (relativePath.startsWith(OMITTED_DEEP_PLUGIN_SDK_DECLARATION_PREFIX)) {
     return false;
   }
   if (
