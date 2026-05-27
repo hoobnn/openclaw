@@ -385,6 +385,25 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
     });
   });
 
+  it("uses cwd for compaction runtime tools while preserving workspace bootstrap root", async () => {
+    await compactEmbeddedPiSessionDirect({
+      sessionId: "session-1",
+      sessionFile: "/tmp/session.jsonl",
+      workspaceDir: "/tmp/workspace",
+      cwd: "/tmp/task-repo",
+    });
+
+    expectRecordFields(mockCallArg(createOpenClawCodingToolsMock), {
+      cwd: "/tmp/task-repo",
+      workspaceDir: "/tmp/workspace",
+      spawnWorkspaceDir: "/tmp/workspace",
+    });
+    expectRecordFields(mockCallArg(createPreparedEmbeddedPiSettingsManagerMock), {
+      cwd: "/tmp/task-repo",
+      agentDir: "/tmp/agents/main/agent",
+    });
+  });
+
   it("uses the caller context token budget during runtime compaction", async () => {
     await compactEmbeddedPiSessionDirect({
       sessionId: "session-1",
@@ -1453,7 +1472,7 @@ describe("compactEmbeddedPiSession hooks (ownsCompaction engine)", () => {
       },
     } as never);
 
-    const result = await compactEmbeddedPiSession(wrappedCompactionArgs());
+    const result = await compactEmbeddedPiSession(wrappedCompactionArgs({ cwd: "/tmp/task-repo" }));
 
     expect(result.ok).toBe(true);
     expectRecordFields(mockCallArg(hookRunner.runAfterCompaction), {
@@ -1506,7 +1525,7 @@ describe("compactEmbeddedPiSession hooks (ownsCompaction engine)", () => {
       maintain,
     } as never);
 
-    const result = await compactEmbeddedPiSession(wrappedCompactionArgs());
+    const result = await compactEmbeddedPiSession(wrappedCompactionArgs({ cwd: "/tmp/task-repo" }));
 
     expect(result.ok).toBe(true);
     const runtimeContext = (
@@ -1517,6 +1536,7 @@ describe("compactEmbeddedPiSession hooks (ownsCompaction engine)", () => {
       sessionFile: TEST_SESSION_FILE,
     });
     expect(runtimeContext?.workspaceDir).toBe(TEST_WORKSPACE_DIR);
+    expect(runtimeContext?.cwd).toBe("/tmp/task-repo");
     expect(runtimeContext?.rewriteTranscriptEntries).toBeTypeOf("function");
   });
 

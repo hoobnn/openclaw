@@ -150,6 +150,7 @@ import { readPiModelContextTokens } from "./model-context-tokens.js";
 import { resolveModelAsync } from "./model.js";
 import { sanitizeSessionHistory, validateReplayTurns } from "./replay-history.js";
 import { createEmbeddedPiResourceLoader } from "./resource-loader.js";
+import { resolveAttemptSpawnWorkspaceDir } from "./run/attempt.thread-helpers.js";
 import { buildEmbeddedSandboxInfo } from "./sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
 import { resolveEmbeddedRunSkillEntries } from "./skills-runtime.js";
@@ -633,11 +634,18 @@ async function compactEmbeddedPiSessionDirectOnce(
       ? resolvedWorkspace
       : sandbox.workspaceDir
     : resolvedWorkspace;
+  const requestedCwd = params.cwd ? resolveUserPath(params.cwd) : undefined;
+  if (sandbox?.enabled && requestedCwd && requestedCwd !== resolvedWorkspace) {
+    throw new Error(
+      "cwd override is not supported for sandboxed embedded compaction runs; omit cwd or use the agent workspace as cwd",
+    );
+  }
+  const effectiveCwd = sandbox?.enabled ? effectiveWorkspace : (requestedCwd ?? effectiveWorkspace);
   await fs.mkdir(effectiveWorkspace, { recursive: true });
   await ensureSessionHeader({
     sessionFile: params.sessionFile,
     sessionId: params.sessionId,
-    cwd: effectiveWorkspace,
+    cwd: effectiveCwd,
   });
   const effectiveSkillAgentId = earlyAgentIds.sessionAgentId;
 
@@ -767,7 +775,15 @@ async function compactEmbeddedPiSessionDirectOnce(
       senderE164: params.senderE164,
       allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
       agentDir,
+      cwd: effectiveCwd,
       workspaceDir: effectiveWorkspace,
+      spawnWorkspaceDir:
+        effectiveCwd !== effectiveWorkspace
+          ? resolvedWorkspace
+          : resolveAttemptSpawnWorkspaceDir({
+              sandbox,
+              resolvedWorkspace,
+            }),
       config: params.config,
       abortSignal: runAbortController.signal,
       sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
@@ -924,7 +940,7 @@ async function compactEmbeddedPiSessionDirectOnce(
     const openClawReferences = await resolveOpenClawReferencePaths({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],
-      cwd: effectiveWorkspace,
+      cwd: effectiveCwd,
       moduleUrl: import.meta.url,
     });
     const promptContributionContext: Parameters<
@@ -1043,7 +1059,7 @@ async function compactEmbeddedPiSessionDirectOnce(
       compactionSessionManager = sessionManager;
       trackSessionManagerAccess(params.sessionFile);
       const settingsManager = createPreparedEmbeddedPiSettingsManager({
-        cwd: effectiveWorkspace,
+        cwd: effectiveCwd,
         agentDir,
         cfg: params.config,
         pluginMetadataSnapshot: getCurrentPluginMetadataSnapshot({
@@ -1064,7 +1080,7 @@ async function compactEmbeddedPiSessionDirectOnce(
         model,
       });
       const resourceLoader = createEmbeddedPiResourceLoader({
-        cwd: resolvedWorkspace,
+        cwd: effectiveCwd,
         agentDir,
         settingsManager,
         extensionFactories,
@@ -1098,7 +1114,7 @@ async function compactEmbeddedPiSessionDirectOnce(
         toolHookContext: {
           agentId: sessionAgentId,
           config: params.config,
-          cwd: effectiveWorkspace,
+          cwd: effectiveCwd,
           sessionKey: sandboxSessionKey,
           sessionId: params.sessionId,
           runId: params.runId,
@@ -1122,7 +1138,7 @@ async function compactEmbeddedPiSessionDirectOnce(
         let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
         try {
           const createdSession = await createAgentSession({
-            cwd: effectiveWorkspace,
+            cwd: effectiveCwd,
             agentDir,
             authStorage,
             modelRegistry,

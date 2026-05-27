@@ -3939,6 +3939,7 @@ describe("buildAfterTurnRuntimeContext", () => {
         ownerNumbers: ["+15555550123"],
       },
       workspaceDir: "/tmp/workspace",
+      cwd: "/tmp/task-repo",
       agentDir: "/tmp/agent",
     });
 
@@ -3972,6 +3973,7 @@ describe("buildAfterTurnRuntimeContext", () => {
         ownerNumbers: ["+15555550123"],
       },
       workspaceDir: "/tmp/workspace",
+      cwd: "/tmp/task-repo",
       agentDir: "/tmp/agent",
     });
 
@@ -4010,6 +4012,7 @@ describe("buildAfterTurnRuntimeContext", () => {
         ownerNumbers: ["+15555550123"],
       },
       workspaceDir: "/tmp/workspace",
+      cwd: "/tmp/task-repo",
       agentDir: "/tmp/agent",
       tokenBudget: 1050000,
       currentTokenCount: 52,
@@ -4020,6 +4023,7 @@ describe("buildAfterTurnRuntimeContext", () => {
     expect(legacy.provider).toBe("openai-codex");
     expect(legacy.model).toBe("gpt-5.4");
     expect(legacy.workspaceDir).toBe("/tmp/workspace");
+    expect(legacy.cwd).toBe("/tmp/task-repo");
     expect(legacy.agentDir).toBe("/tmp/agent");
     expect(legacy.tokenBudget).toBe(1050000);
     expect(legacy.currentTokenCount).toBe(52);
