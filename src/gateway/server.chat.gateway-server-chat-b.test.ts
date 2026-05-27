@@ -1117,21 +1117,30 @@ describe("gateway server chat", () => {
             },
           },
         });
+        await writeMainSessionTranscript(sessionDir, [
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: [{ type: "text", text: "local webchat follow-up" }],
+              timestamp: Date.parse("2026-03-26T16:30:00.000Z"),
+            },
+          }),
+        ]);
 
         const recent = await fetchHistoryPayload(ws, { limit: 2 });
         expect(recent.messages?.map((message) => JSON.stringify(message))).toEqual([
-          expect.stringContaining("recent imported user"),
           expect.stringContaining("recent imported assistant"),
+          expect.stringContaining("local webchat follow-up"),
         ]);
         expect(recent.hasMore).toBe(true);
-        expect(recent.nextBeforeSeq).toBe(3);
+        expect(recent.nextBeforeSeq).toBe(4);
 
-        const older = await fetchHistoryPayload(ws, { beforeSeq: 3, limit: 2 });
+        const older = await fetchHistoryPayload(ws, { beforeSeq: 4, limit: 2 });
         expect(older.messages?.map((message) => JSON.stringify(message))).toEqual([
-          expect.stringContaining("older imported user"),
           expect.stringContaining("older imported assistant"),
+          expect.stringContaining("recent imported user"),
         ]);
-        expect(older.hasMore).toBe(false);
+        expect(older.hasMore).toBe(true);
       } finally {
         if (originalHome === undefined) {
           delete process.env.HOME;

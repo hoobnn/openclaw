@@ -1447,13 +1447,33 @@ async function readProjectedChatHistoryPageAsync(params: {
   sessionId: string | undefined;
   storePath: string | undefined;
 }): Promise<{ hasMore: boolean; messages: Array<Record<string, unknown>> }> {
-  const importedMessages = attachChatHistoryPageSeqs(
+  const recent =
+    params.sessionId && params.storePath
+      ? await readRecentSessionMessagesWithStatsAsync(
+          params.sessionId,
+          params.storePath,
+          params.sessionFile,
+          {
+            maxMessages: Math.min(1000, Math.max(params.maxMessages, params.maxMessages * 10)),
+            maxBytes: Math.max(params.maxHistoryBytes * 2, 1024 * 1024),
+          },
+        )
+      : { messages: [], totalMessages: 0 };
+  const hasImportedMessages =
     augmentChatHistoryWithCliSessionImports({
       entry: params.entry,
       provider: params.provider,
       localMessages: [],
-    }),
-  );
+    }).length > 0;
+  const importedMessages = hasImportedMessages
+    ? attachChatHistoryPageSeqs(
+        augmentChatHistoryWithCliSessionImports({
+          entry: params.entry,
+          provider: params.provider,
+          localMessages: recent.messages,
+        }),
+      )
+    : [];
   if (importedMessages.length > 0) {
     const projected = augmentChatHistoryWithCanvasBlocks(
       projectRecentChatDisplayMessages(importedMessages, {
@@ -1481,18 +1501,6 @@ async function readProjectedChatHistoryPageAsync(params: {
   let displayableCount = 0;
   let hasMore = false;
   if (typeof params.beforeSeq !== "number") {
-    const recent =
-      params.sessionId && params.storePath
-        ? await readRecentSessionMessagesWithStatsAsync(
-            params.sessionId,
-            params.storePath,
-            params.sessionFile,
-            {
-              maxMessages: Math.min(1000, Math.max(params.maxMessages, params.maxMessages * 10)),
-              maxBytes: Math.max(params.maxHistoryBytes * 2, 1024 * 1024),
-            },
-          )
-        : { messages: [], totalMessages: 0 };
     const projected = augmentChatHistoryWithCanvasBlocks(
       projectRecentChatDisplayMessages(recent.messages, {
         maxChars: params.effectiveMaxChars,
