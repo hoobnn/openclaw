@@ -529,7 +529,7 @@ function buildWhatsAppQaConfig(
           ...baseCfg.agents?.defaults?.heartbeat,
           every: "0m",
         },
-        skipBootstrap: true,
+        skipBootstrap: false,
         skills: [],
         thinkingDefault: "off",
       },

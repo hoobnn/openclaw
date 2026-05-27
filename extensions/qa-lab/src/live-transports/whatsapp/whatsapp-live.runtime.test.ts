@@ -192,8 +192,8 @@ describe("WhatsApp QA live runtime", () => {
         sutAccountId: "sut",
       },
     );
-    expect(cfg.agents?.defaults?.skipBootstrap).toBe(true);
     expect(cfg.agents?.defaults?.heartbeat?.every).toBe("0m");
+    expect(cfg.agents?.defaults?.skipBootstrap).toBe(false);
     expect(cfg.agents?.defaults?.skills).toEqual([]);
     expect(cfg.agents?.defaults?.thinkingDefault).toBe("off");
     expect(cfg.agents?.defaults?.models?.["openai/gpt-5.5"]?.agentRuntime).toEqual({
