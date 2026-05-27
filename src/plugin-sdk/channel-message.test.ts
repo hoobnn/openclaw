@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { defineChannelMessageAdapter } from "./channel-outbound.js";
+import { defineChannelMessageAdapter } from "./channel-message.js";
 
 describe("defineChannelMessageAdapter", () => {
   it("keeps new and legacy channel plugin SDK subpaths importable", async () => {

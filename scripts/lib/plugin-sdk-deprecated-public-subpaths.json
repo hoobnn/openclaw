@@ -1,7 +1,6 @@
 [
   "agent-config-primitives",
   "channel-config-schema-legacy",
-  "channel-outbound",
   "channel-reply-pipeline",
   "channel-runtime",
   "channel-secret-runtime",
