@@ -95,7 +95,7 @@ describe("withOperatorApprovalsGatewayClient", () => {
       },
     );
 
-    expect(clientState.options?.scopes).toEqual(["operator.approvals"]);
+    expect(clientState.options?.scopes).toEqual(["operator.write", "operator.approvals"]);
     expect(typeof clientState.options?.approvalRuntimeToken).toBe("string");
     expect(clientState.options?.deviceIdentity).toBeNull();
     expect(clientState.requestSpy).toHaveBeenCalledWith("exec.approval.resolve", {

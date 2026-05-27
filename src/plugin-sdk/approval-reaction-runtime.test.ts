@@ -179,6 +179,68 @@ describe("plugin-sdk/approval-reaction-runtime", () => {
     });
   });
 
+  it("keeps plugin command actions visible without turning them into reactions", () => {
+    const payload = buildApprovalPendingPromptPayload({
+      request: {
+        ...pluginRequest,
+        id: "plugin:agentkit",
+        request: {
+          title: "World proof required for exec",
+          description: "World proof is required before the tool can continue.",
+          severity: "warning",
+          actions: [
+            {
+              kind: "command",
+              label: "Verify once",
+              command: "/agentkit approve plugin:agentkit allow-once",
+              style: "success",
+            },
+            {
+              kind: "decision",
+              label: "Deny",
+              command: "/approve plugin:agentkit deny",
+              decision: "deny",
+              style: "danger",
+            },
+          ],
+        },
+      },
+      view: {
+        approvalKind: "plugin",
+        phase: "pending",
+        approvalId: "plugin:agentkit",
+        title: "World proof required for exec",
+        description: "World proof is required before the tool can continue.",
+        severity: "warning",
+        metadata: [],
+        expiresAtMs: 61_000,
+        actions: [
+          {
+            kind: "command",
+            label: "Verify once",
+            command: "/agentkit approve plugin:agentkit allow-once",
+            style: "success",
+          },
+          {
+            kind: "decision",
+            label: "Deny",
+            command: "/approve plugin:agentkit deny",
+            decision: "deny",
+            style: "danger",
+          },
+        ],
+      },
+      nowMs: 1_000,
+    });
+
+    expect(payload.text).toContain("Command actions:");
+    expect(payload.text).toContain("/agentkit approve plugin:agentkit allow-once");
+    expect(payload.text).toContain("Reply with: /approve plugin:agentkit deny");
+    expect(payload.text).toContain("👎 Deny");
+    expect(payload.text).not.toContain("👍 Allow Once");
+    expect(payload.allowedDecisions).toEqual(["deny"]);
+  });
+
   it("renders the same request-only and view-taking prompt payloads", () => {
     const fromRequest = buildApprovalReactionPromptPayloadForRequest({
       request: execRequest,

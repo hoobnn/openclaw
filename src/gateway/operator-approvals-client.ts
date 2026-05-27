@@ -63,7 +63,7 @@ export async function createOperatorApprovalsGatewayClient(
     clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
     clientDisplayName: params.clientDisplayName,
     mode: GATEWAY_CLIENT_MODES.BACKEND,
-    scopes: ["operator.approvals"],
+    scopes: ["operator.write", "operator.approvals"],
     deviceIdentity: shouldOmitOperatorApprovalDeviceIdentity({
       url: bootstrap.url,
       token: bootstrap.auth.token,

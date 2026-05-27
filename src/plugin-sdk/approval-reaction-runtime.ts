@@ -212,6 +212,16 @@ function listDecisionActions(actions: PendingApprovalView["actions"]): ExecAppro
   );
 }
 
+function listCommandActions(actions: PendingApprovalView["actions"]): string[] {
+  return actions.flatMap((action) => {
+    if (action.kind !== "command") {
+      return [];
+    }
+    const command = action.command.trim();
+    return command ? [command] : [];
+  });
+}
+
 function buildApprovalReactionPromptText(params: {
   view: PendingApprovalView;
   nowMs: number;
@@ -274,6 +284,10 @@ function buildApprovalReactionPromptText(params: {
     details.push(`Expires in: ${formatExecApprovalExpiresIn(view.expiresAtMs, params.nowMs)}`);
     details.push(`Full id: \`${view.approvalId}\``);
     sections.push(details.join("\n"));
+  }
+  const commandActions = listCommandActions(view.actions);
+  if (commandActions.length > 0) {
+    sections.push(["Command actions:", buildFence(commandActions.join("\n"), "txt")].join("\n"));
   }
   if (params.reactionHint) {
     sections.push(params.reactionHint);
