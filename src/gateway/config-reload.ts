@@ -367,10 +367,17 @@ export function startGatewayConfigReloader(opts: {
     }
   };
 
+  const usePolling = Boolean(process.env.VITEST);
   const watcher = chokidar.watch(opts.watchPath, {
     ignoreInitial: true,
-    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
-    usePolling: Boolean(process.env.VITEST),
+    // Only use awaitWriteFinish when polling is enabled (test environments).
+    // On macOS/Linux with native FS events, awaitWriteFinish forces chokidar
+    // to stat() watched files at pollInterval even when usePolling is false,
+    // causing significant idle CPU usage (see #87256).
+    ...(usePolling && {
+      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+    }),
+    usePolling,
   });
 
   const scheduleFromWatcher = () => {

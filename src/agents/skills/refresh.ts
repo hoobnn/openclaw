@@ -126,14 +126,22 @@ function sameWatchTargets(a: string[], b: string[]): boolean {
 }
 
 function createSkillsPathWatcher(watchPath: string, debounceMs: number): SkillsPathWatchState {
+  const usePolling = Boolean(process.env.VITEST);
   const watcher = chokidar.watch(watchPath, {
     ignoreInitial: true,
     // Skill discovery reads root skills, direct child skills, and one grouped skill level.
     depth: 2,
-    awaitWriteFinish: {
-      stabilityThreshold: debounceMs,
-      pollInterval: 100,
-    },
+    // Only use awaitWriteFinish when polling is enabled (test environments).
+    // On macOS/Linux with native FS events, awaitWriteFinish forces chokidar
+    // to stat() watched files at pollInterval even when usePolling is false,
+    // causing significant idle CPU usage (see #87256).
+    ...(usePolling && {
+      awaitWriteFinish: {
+        stabilityThreshold: debounceMs,
+        pollInterval: 100,
+      },
+    }),
+    usePolling,
     ignored: shouldIgnoreSkillsWatchPath,
   });
 
