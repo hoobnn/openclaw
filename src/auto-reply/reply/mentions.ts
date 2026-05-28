@@ -22,7 +22,10 @@ function deriveMentionPatterns(identity?: { name?: string; emoji?: string }) {
   if (name) {
     const parts = name.split(/\s+/).filter(Boolean).map(escapeRegExp);
     const re = parts.length ? parts.join(String.raw`\s+`) : escapeRegExp(name);
-    patterns.push(String.raw`\b@?${re}\b`);
+    // Use negative look-around instead of \b so CJK and other non-ASCII
+    // characters are correctly matched.  \b only recognises ASCII \w
+    // boundaries and fails for single-char CJK names like "包".
+    patterns.push(String.raw`(?<!\w)@?${re}(?!\w)`);
   }
   const emoji = normalizeOptionalString(identity?.emoji);
   if (emoji) {
