@@ -33,6 +33,7 @@ export class OpenClawStdioClientTransport implements Transport {
   private readonly readBuffer = new ReadBuffer();
   private readonly stderrStream: PassThrough | null = null;
   private process?: ChildProcess;
+  private closePromise?: Promise<void>;
 
   constructor(private readonly serverParams: OpenClawStdioServerParameters) {
     if (serverParams.stderr === "pipe" || serverParams.stderr === "overlapped") {
@@ -111,6 +112,14 @@ export class OpenClawStdioClientTransport implements Transport {
   }
 
   async close(): Promise<void> {
+    if (this.closePromise) {
+      return this.closePromise;
+    }
+    this.closePromise = this.doClose();
+    return this.closePromise;
+  }
+
+  private async doClose(): Promise<void> {
     const processToClose = this.process;
     this.process = undefined;
     if (processToClose) {

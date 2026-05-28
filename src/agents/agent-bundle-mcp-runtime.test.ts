@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeExecutable } from "./bundle-mcp-shared.test-harness.js";
 import { createBundleMcpJsonSchemaValidator } from "./agent-bundle-mcp-runtime.js";
 import { cleanupBundleMcpHarness } from "./agent-bundle-mcp-test-harness.js";
 import {
@@ -13,6 +12,7 @@ import {
   retireSessionMcpRuntimeForSessionKey,
 } from "./agent-bundle-mcp-tools.js";
 import type { SessionMcpRuntime } from "./agent-bundle-mcp-types.js";
+import { writeExecutable } from "./bundle-mcp-shared.test-harness.js";
 
 vi.mock("./embedded-agent-mcp.js", () => ({
   loadEmbeddedAgentMcpConfig: (params: {
@@ -803,6 +803,63 @@ describe("session MCP runtime", () => {
     }
     expect(contentA.text).toBe("FROM-CONFIG-A");
     expect(contentB.text).toBe("FROM-CONFIG-B");
+  });
+
+  it("deduplicates concurrent getOrCreate calls when config fingerprint changes", async () => {
+    let createCount = 0;
+    let disposeCount = 0;
+    const manager = testing.createSessionMcpRuntimeManager({
+      createRuntime: (params) => {
+        createCount += 1;
+        return {
+          ...makeRuntime([{ toolName: "probe", description: "Probe" }]),
+          sessionId: params.sessionId,
+          sessionKey: params.sessionKey,
+          workspaceDir: params.workspaceDir,
+          configFingerprint: params.configFingerprint ?? "fingerprint",
+          dispose: async () => {
+            disposeCount += 1;
+          },
+        };
+      },
+      enableIdleSweepTimer: false,
+    });
+
+    // First call creates a runtime with fingerprint "v1".
+    const cfgV1 = {
+      mcp: { servers: { fs: { command: "node", args: ["v1.mjs"] } } },
+    };
+    await manager.getOrCreate({
+      sessionId: "race-session",
+      workspaceDir: "/workspace",
+      cfg: cfgV1,
+    });
+    expect(createCount).toBe(1);
+
+    // Two concurrent calls with a changed fingerprint (v2) must not each
+    // spawn a separate runtime — only one replacement should be created.
+    const cfgV2 = {
+      mcp: { servers: { fs: { command: "node", args: ["v2.mjs"] } } },
+    };
+    const [runtimeX, runtimeY] = await Promise.all([
+      manager.getOrCreate({
+        sessionId: "race-session",
+        workspaceDir: "/workspace",
+        cfg: cfgV2,
+      }),
+      manager.getOrCreate({
+        sessionId: "race-session",
+        workspaceDir: "/workspace",
+        cfg: cfgV2,
+      }),
+    ]);
+
+    // Both callers should receive the same runtime instance.
+    expect(runtimeX).toBe(runtimeY);
+    // The old v1 runtime should have been disposed exactly once.
+    expect(disposeCount).toBe(1);
+    // Only one replacement runtime should have been created (total 2).
+    expect(createCount).toBe(2);
   });
 
   it("disposes catalog startup in-flight without leaving cached runtimes", async () => {

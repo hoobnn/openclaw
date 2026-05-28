@@ -3,12 +3,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv-provider.js";
 import type {
   JsonSchemaType,
   JsonSchemaValidator,
   jsonSchemaValidator,
 } from "@modelcontextprotocol/sdk/validation/types.js";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv-provider.js";
 import { Compile } from "typebox/compile";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";
@@ -559,7 +559,37 @@ function createSessionMcpRuntimeManager(
           existing.configFingerprint !== nextFingerprint
         ) {
           runtimesBySessionId.delete(params.sessionId);
-          await existing.dispose();
+          // Dispose the old runtime and create the replacement in a single
+          // in-flight entry so concurrent callers deduplicate instead of
+          // spawning duplicate MCP sidecar processes.
+          const replaced = existing
+            .dispose()
+            .catch(() => undefined)
+            .then(() =>
+              createRuntime({
+                sessionId: params.sessionId,
+                sessionKey: params.sessionKey,
+                workspaceDir: params.workspaceDir,
+                cfg: params.cfg,
+                configFingerprint: nextFingerprint,
+              }),
+            )
+            .then((runtime) => {
+              runtime.markUsed();
+              runtimesBySessionId.set(params.sessionId, runtime);
+              idleTtlMsBySessionId.set(params.sessionId, idleTtlMs);
+              return runtime;
+            });
+          createInFlight.set(params.sessionId, {
+            promise: replaced,
+            workspaceDir: params.workspaceDir,
+            configFingerprint: nextFingerprint,
+          });
+          try {
+            return await replaced;
+          } finally {
+            createInFlight.delete(params.sessionId);
+          }
         } else {
           existing.markUsed();
           idleTtlMsBySessionId.set(params.sessionId, idleTtlMs);
