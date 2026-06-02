@@ -377,7 +377,7 @@ export async function backupVerifyCommand(
   const entries = rawEntries.map((entry) => ({
     raw: entry.path,
     normalized: normalizeArchivePath(entry.path, "Archive entry"),
-    isLink: entry.type === "Link",
+    isFile: entry.type === "File",
   }));
   const hardlinkTargets = rawEntries
     .filter((entry) => entry.type === "Link" && entry.linkpath)
@@ -390,12 +390,12 @@ export async function backupVerifyCommand(
       ),
     }));
   const normalizedEntrySet = new Set(entries.map((entry) => entry.normalized));
-  // Hardlink targets must resolve to a real archived file. Excluding Link
-  // entries keeps a corrupt/malicious self-referential or link-to-link hardlink
-  // from satisfying the integrity check by pointing at another link rather than
-  // a payload file.
+  // Hardlink targets must resolve to a regular archived file. Restricting to
+  // File entries (not just non-Link) keeps a corrupt/malicious hardlink that
+  // points at a directory, another link, or itself from satisfying the
+  // integrity check without backing file contents.
   const payloadEntrySet = new Set(
-    entries.filter((entry) => !entry.isLink).map((entry) => entry.normalized),
+    entries.filter((entry) => entry.isFile).map((entry) => entry.normalized),
   );
 
   const manifestMatches = entries.filter((entry) => isRootManifestEntry(entry.normalized));

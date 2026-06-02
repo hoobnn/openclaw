@@ -36,14 +36,15 @@ function createBackupManifest(assetArchivePath: string, archiveRoot = TEST_ARCHI
 function encodeTarEntry(params: {
   path: string;
   contents?: string;
-  type?: "File" | "Link";
+  type?: "File" | "Link" | "Directory";
   linkpath?: string;
 }): Buffer {
   const body = Buffer.from(params.contents ?? "", "utf8");
+  const bodyless = params.type === "Link" || params.type === "Directory";
   const header = new tar.Header({
     path: params.path,
     type: params.type ?? "File",
-    size: params.type === "Link" ? 0 : body.length,
+    size: bodyless ? 0 : body.length,
     mode: 0o600,
     uid: 0,
     gid: 0,
@@ -52,7 +53,7 @@ function encodeTarEntry(params: {
   });
   const headerBlock = Buffer.alloc(512);
   header.encode(headerBlock);
-  if (params.type === "Link") {
+  if (bodyless) {
     return headerBlock;
   }
   const padding = Buffer.alloc((512 - (body.length % 512)) % 512);
@@ -595,6 +596,42 @@ describe("backupVerifyCommand", () => {
             path: secondLinkArchivePath,
             type: "Link",
             linkpath: ".openclaw/a.txt",
+          }),
+          Buffer.alloc(1024),
+        ]),
+      );
+      await fs.writeFile(archivePath, archive);
+
+      const runtime = createBackupVerifyRuntime();
+      await expect(backupVerifyCommand(runtime, { archive: archivePath })).rejects.toThrow(
+        /hardlink target is missing from archive entries/i,
+      );
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a legacy hardlink whose target resolves to a non-file entry", async () => {
+    // Hardlinks must be backed by file contents; a target that resolves to a
+    // directory (or any non-file) entry is not a valid restore source.
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-backup-dir-linkpath-"));
+    const archivePath = path.join(tempDir, "broken.tar.gz");
+    const payloadArchivePath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/target.txt`;
+    const dirArchivePath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/state`;
+    const hardlinkArchivePath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/logs/b.bin`;
+    try {
+      const archive = gzipSync(
+        Buffer.concat([
+          encodeTarEntry({
+            path: `${TEST_ARCHIVE_ROOT}/manifest.json`,
+            contents: `${JSON.stringify(createBackupManifest(payloadArchivePath), null, 2)}\n`,
+          }),
+          encodeTarEntry({ path: payloadArchivePath, contents: "payload\n" }),
+          encodeTarEntry({ path: `${dirArchivePath}/`, type: "Directory" }),
+          encodeTarEntry({
+            path: hardlinkArchivePath,
+            type: "Link",
+            linkpath: ".openclaw/state",
           }),
           Buffer.alloc(1024),
         ]),
